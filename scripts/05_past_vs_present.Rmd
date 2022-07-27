@@ -7,6 +7,12 @@ editor_options:
   chunk_output_type: console
 ---
 
+- cleaning code base in case we are accepted, having that data/code package ready to go
+- prioritizing next papers
+   * data cleaning (do we need to re-download everything for other taxa, and if so, why not start that up now?)
+   * data analyses
+   * refining questions/ writing
+- growing the team? might some additional fire power help us achieve the point above?
 
 
 ```{r setup, include=FALSE}
@@ -275,6 +281,7 @@ holc |>
 # 2x checks
 summary(pad)
 pad |> map(~sum(is.na(.))) |> bind_rows() |> t()
+pad |> map_dfr(~sum(is.na(.)))
 
 holc |> select(id) |> left_join(pad, by = 'id')
 holc |> anti_join(pad, by = 'id')
