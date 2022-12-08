@@ -1,0 +1,495 @@
+---
+title: "01_get_MSAs"
+author: "Dexter H. Locke, PhD"
+date: "`r format(Sys.time())`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+Objectives
+1. get get running
+2. make decisions on HOLC unique ID 
+3. save out MSA polygons for downloading all GBIF records
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+most of this is based on "02_MSA_CBG_Links_equity_HOLC_ID_level.Rmd" in the first paper's 
+  
+## 0 set up: load libraries, custom functions, set defaults
+```{r}
+
+# load libraries
+# packages we'll be using
+packs <- c(
+  'tidyverse'         # a must have!
+  , 'tidylog'         # makes things very verbose for 2x checking 
+  , 'magrittr'        # all of the pipes
+  , 'janitor'         # cleans things up
+  , 'sf'              # spatial support
+  , 'tidycensus'      # Census access
+  , 'mapview'         # webmaps
+  , 'tictoc'          # times things
+  , 'beepr'           # makes noises
+  )         
+
+# check for all of the libraries
+if (length(setdiff(packs, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packs, rownames(installed.packages())))  
+}
+
+# load them
+vapply(packs, library, character.only = TRUE, logical(1), logical.return = TRUE, quietly = TRUE)
+
+
+# setting for get_acs
+census_api_key('db9b3481879b9e79eb8c86608656c3c8a8640bbb', install = TRUE, overwrite = TRUE)
+readRenviron("~/.Renviron")
+options(tigris_use_cache = TRUE)
+
+# keep random things consistent
+# set.seed(19870630) # needed?
+
+
+# redlining colors
+holc_pal <- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              #, '#A9A9A9'
+              ) # dark gray)
+
+holc_pal_f<- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              , '#A9A9A9'
+              , '#000000')
+
+
+# set custom function for getting spatial data
+see_sf <- function(){
+# what's in memory that are sf - spatial features?
+keep(eapply(.GlobalEnv, class),      # gets the objects in the global environment
+     ~ any(str_detect(., "sf"))) %>% # selects elements with sf in them
+    names(.) %>% as.character(.)     # my simple features
+}
+
+see_sf() -> sf_in_memory
+
+# what are the spatial references of those SF classes?
+mget(sf_in_memory) %>% purrr::map(~st_crs(.x)$epsg) %>% unlist() #%>% View()
+
+
+# # get file size
+# for(obj in ls()){message(obj); print(object.size(get(obj)), units='auto'); cat('\n')}; rm(obj)
+
+# thanks Phil Donovan @philip_donovan
+# https://www.spatialanalytics.co.nz/post/2018/04/01/fixing-st-par/
+# Paralise any simple features analysis.
+st_parallel <- function(sf_df, sf_func, n_cores, ...){
+
+  # Create a vector to split the data set up by.
+  split_vector <- rep(1:n_cores, each = nrow(sf_df) / n_cores, length.out = nrow(sf_df))
+
+  # Perform GIS analysis
+  split_results <- split(sf_df, split_vector) %>%
+    parallel::mclapply(function(x) sf_func(x, ...), mc.cores = n_cores)
+
+
+  # Define the output_class. If length is greater than two, then grab the second variable.
+  output_class <- class(split_results[[1]])
+  if (length(output_class) == 2){
+    output_class <- output_class[2]
+  }
+
+  # Combine results back together. Method of combining depends on the output from the function.
+  if (output_class == "matrix"){
+    result <- do.call("rbind", split_results)
+    names(result) <- NULL
+  } else if (output_class == "sfc") {
+    result <- do.call("c", split_results)
+    result <- sf_func(result) # do.call combines the list but there are still n_cores of the geometry which had been split up. Running st_union or st_collect gathers them up into one, as is the expected output of these two functions.
+  } else if (output_class %in% c('list', 'sgbp') ){
+    result <- do.call("c", split_results)
+    names(result) <- NULL
+  } else if (output_class == "data.frame" ){
+    result <- do.call("rbind", split_results)
+  } else {
+    stop("Unknown class. st_parallel only accepts the following outputs at present: sfc, list, sf, matrix, sgbp.")
+  }
+
+  # Return result
+  return(result)
+}
+
+
+# custom function for "Not In"
+`%nin%` <- Negate(`%in%`)
+
+
+
+# fixes mapview
+mapviewOptions(fgb = FALSE)
+
+```
+
+
+## 1 bring HOLC polygons
+```{r}
+
+sf::sf_use_s2(FALSE) # supresses error about invalid loops in 1212, 2851
+# https://stackoverflow.com/questions/68478179/how-to-resolve-spherical-geometry-failures-when-joining-spatial-data
+
+tic(); (holc <- 
+          st_read("https://dsl.richmond.edu/panorama/redlining/static/fullDownload.geojson") |> 
+          # st_read('input_data/HOLC_shapefile/holc_ad_data.shp', as_tibble = TRUE) |> 
+          filter(!is.na(holc_grade) & holc_grade != 'E') %>%
+          st_cast('POLYGON') %>% # IMPORTANT
+          filter(!st_is_empty(.)) %>% 
+          st_make_valid(.) %>% 
+          rowid_to_column() %>% 
+          rowid_to_column(var = 'global_id') %>% 
+          # rowid_to_column(var = 'internal_id') %>% # TODO get this squeeky clean
+          mutate(  id = paste(state, city, holc_id, holc_grade, rowid, sep = '_')
+                 , city_state = paste0(city, ', ', state)
+                 , area_holc_km2 = as.double(st_area(.) / 1e+6)) %>% 
+  select(id, global_id, state, city, holc_id, holc_grade, city_state, area_holc_km2));toc() # < 5 seconds
+
+
+# check uniqueness of IDs
+all.equal(n_distinct(holc$id), dim(holc)[1])
+
+# double check a few places
+holc %>%
+  # filter(state == 'MA') %>%
+  # filter(state == 'RI') %>%
+  # filter(state == 'NY') %>%
+  filter(state == 'CA') %>%
+  mapview(zcol =   'holc_grade'
+          , col.regions = holc_pal)
+
+```
+
+### A double checks, EDA (sort of), find states to import
+```{r}
+
+# are there sates without holc polys?
+(
+fips_codes %>% distinct(state, state_name) %>% 
+  left_join(., 
+            holc %>% 
+              st_drop_geometry() %>%
+              tabyl(state) %>%
+              tibble()
+            , by = 'state'
+            ) -> holc_by_state
+)
+
+holc_by_state %>% filter(is.na(n)) # states without data, drop these from CBG and MSA?
+
+# test for holc polys that cross states.
+states <- tidycensus::get_decennial(geography = 'state'
+                               , variable = 'P001001' # population, just need something
+                               , year = 2010
+                               # hopefully states have not changed since 2010 :-/
+                               , geometry = TRUE
+                               , output = 'wide'
+                               # , keep_geo_vars = TRUE
+                                  ) %>%
+  arrange(GEOID) %>% 
+  st_transform(., crs = st_crs(holc))
+
+# intersect to find 'broken' polygons straddling across state lines
+# tic(); test_holc_state_int <- holc %>% st_intersection(., states); toc() # ~ 1 min
+
+tic(); test_holc_state_int <- holc %>% 
+  st_parallel(.
+              , st_intersection
+              , n_cores = 5
+              , y = states); toc() # ~15 second
+
+# 32 cross-boundary intersections.. no bueno
+holc %>% dim() - test_holc_state_int %>% dim() 
+
+# find the straddlers
+(test_holc_state_int %>% 
+  st_drop_geometry() %>% 
+  group_by(id) %>% 
+  count() %>% 
+  arrange(id) %>% 
+  filter(n > 1) -> holc_x_state)
+
+# find the states
+(
+  test_holc_state_int %>% 
+    filter(id %in% holc_x_state$id) %>% # the straddlers
+    arrange(id) %>%                     # cosmetic, helps debug
+    select(id, state, NAME) %>%         # keep what we need and no more 
+    distinct(NAME) %>%                  # gets unique list of states
+    left_join(.                         # state vs state_name, lookup to `translate`
+              , fips_codes %>% distinct(state, state_name)
+              , by = c('NAME' = 'state_name')) %>% 
+    rename(state_name = NAME) -> states_with_crosses
+)
+
+# states to include
+(
+  holc_by_state %>% filter(!is.na(n)) %>% # from holc polys
+    select(state, state_name) %>% 
+    bind_rows(., states_with_crosses) %>% # from the state intersections
+    distinct() %>% 
+    arrange(state) -> states_to_query
+)
+
+```
+
+### B misc old, not that interesting EDA
+```{r eval=FALSE, include=FALSE}
+# there are some low-count cities, is that a problem for the biodiversity measures?
+holc %>% 
+  st_drop_geometry() %>% 
+  tabyl(city)
+
+# handsome table
+(
+holc %>% 
+    st_drop_geometry() %>% 
+    tabyl(city_state, holc_grade) %>% 
+    adorn_totals(where = 'col') %>% 
+    tibble() %>% 
+    separate(city_state, sep = ', ', into = c('city', 'state'), remove = FALSE) -> neighs_per_city
+)
+
+
+neighs_per_city %>% 
+  select(-Total) %>% 
+  pivot_longer(c(A:E), names_to = 'holc_grade', values_to = 'counts') %>% 
+  ggplot(aes(counts, reorder(city_state, -counts), fill = holc_grade)) + 
+  scale_fill_manual(values = holc_pal_f) + 
+  geom_col() + 
+  # geofacet::facet_geo(~state, grid = 'us_state_with_DC_PR_grid2') +
+  theme_bw(14) + 
+  theme(axis.text.y = element_text(size = 6))
+
+
+# geofacet by state
+neighs_per_city %>% 
+  mutate(state = ifelse(state == 'Darien', 'CT', state)) %>% 
+  select(-Total) %>% 
+  pivot_longer(c(A:E), names_to = 'holc_grade', values_to = 'counts') %>% 
+  ggplot(aes(counts, reorder(city, -counts), fill = holc_grade)) + 
+  scale_fill_manual(values = holc_pal_f) + 
+  geom_col() + 
+  geofacet::facet_geo(~state, grid = 'us_state_with_DC_PR_grid2', scales = 'free') +
+  theme_bw(14) + 
+  theme(axis.text.y = element_text(size = 6))
+
+
+# kind of useless
+holc %>% 
+  st_drop_geometry() %>% 
+  tabyl(city)
+
+# some polygons have funky names
+(holc %>% 
+  st_drop_geometry() %>% 
+  tabyl(holc_id) %>% 
+  tibble() %>% 
+  arrange(desc(n)) -> holc_ids); tail(holc_ids)
+
+holc %>% 
+  st_drop_geometry() %>% 
+  tabyl(holc_grade)
+
+holc %>% filter(holc_id == '80R')
+```
+
+
+
+## 2 bring in MSA
+```{r}
+# v19 <- load_variables(2019, "acs5", cache = TRUE)
+# View(v19)
+
+# https://walker-data.com/tidycensus/articles/basic-usage.html
+msa <- get_acs(geography = 
+                 "metropolitan statistical area/micropolitan statistical area"
+               # , state = states_to_query$state # makes errors
+               # population - just need some variable
+               , variables = c('pop' = 'B01001_001') 
+               # add income and/or racial composition?
+               , year = 2019
+               , geometry = TRUE
+               , output = 'wide'
+               , moe_level = 95
+               ) %>% 
+  rename(msa_GEOID = GEOID) %>% 
+  st_make_valid() %>% 
+  st_transform(crs = st_crs(holc)) %>%
+  mutate(area_msa_km2 = as.double(st_area(.) / 1e+6)) %>% 
+  separate(NAME, into = c('place', 'rest'), sep = ', ', remove = FALSE) %>% 
+  separate(rest, into = c('states', 'type'), sep = '\\s') %>% 
+  separate(states, into = c('s1', 's2', 's3', 's4')) %>% 
+  filter(
+    s1 %in% states_to_query$state | 
+    s2 %in% states_to_query$state | 
+    s3 %in% states_to_query$state | 
+    s4 %in% states_to_query$state
+    ) |> 
+   rename(msa_name = NAME)
+
+
+# bring in table-only (when we intersect file above, we don't need all of the extra columns)
+msa_tbl_vars <- get_acs(geography = 
+                 "metropolitan statistical area/micropolitan statistical area"
+               # population - just need some variable
+               , variables = c(# 'pop' = 'B01001_001'
+                               'medhhinc' = 'B19013_001'
+                               , 'total_pop' = 'B02001_001'
+                               , 'White alone' = 'B02001_002'
+                               , 'Black or African American alone' = 'B02001_003'
+                               , 'American Indian and Alaska Native alone' = 'B02001_004'
+                               , 'Asian alone' = 'B02001_005'
+                               , 'Native Hawaiian and Other Pacific Islander alone' = 'B02001_006'
+                               , 'Some other race alone' = 'B02001_007'
+                               , 'Two or more races' = 'B02001_008'
+# B02001_009	Two or more races:!!Two races including Some other race	RACE
+# B02001_010	Two or more races:!!Two races excluding Some other race, and three or more races
+                               ) 
+               # add income and/or racial composition?
+               , year = 2019
+               , geometry = FALSE
+               , output = 'wide'
+               , moe_level = 95
+               ) %>% 
+  rename_all(~paste0('msa_', .))
+
+# TODO do we care?
+dim(msa); msa %>% st_cast('POLYGON') %>% dim()
+
+# msa_tbl_vars |> 
+#   write_csv(file = paste0(getwd()
+#                           ,'/working_data/MSA/msa_tbl_vars_'
+#                           , gsub('[[:punct:]]', '-', Sys.time())
+#                           , '.csv'))
+
+
+# mapview::mapview(msa, col.regions = 'NA') +
+#   mapview::mapview(holc, zcol = 'holc_grade', col.regions = holc_pal_f)
+
+```
+
+
+### A find HOLC polygons that cross MSA lines, fix assignment
+```{r}
+
+# intersect to find 'broken' polygons straddling across urban area lines
+tic(); test_holc_msa_int <- st_parallel(holc
+                                        , st_intersection
+                                        , n_cores = 10
+                                        , y = msa); toc() # ~2.5 mins w 10 core
+
+# 8 cross-boundary intersections.. no bueno
+holc %>% dim() - test_holc_msa_int %>% dim()
+
+# find the straddlers
+(test_holc_msa_int %>%
+  st_drop_geometry() %>%
+  group_by(id) %>%
+  count() %>%
+  arrange(id) %>%
+  filter(n > 1) %>%
+  mutate(state = str_sub(id, 1,2)) -> holc_x_msa)
+
+unique(holc_x_msa$state) # CT, IA, NH, OH, RI!
+
+# msa's of the
+(crossed_msa <- test_holc_msa_int %>%
+               filter(id %in% holc_x_msa$id) %>%
+               distinct(msa_GEOID) %>%
+               pull())
+
+# where are they?
+# manual re-assignments with holc_x_msa polygons
+  mapview(
+    msa %>% filter(msa_GEOID %in% crossed_msa)
+    ) +
+test_holc_msa_int %>% filter(id %in% holc_x_msa$id) %>%
+  mapview(., zcol = 'holc_grade', col.regions = holc_pal)
+
+
+
+# test_holc_msa_int %>% #mapview()
+#   st_drop_geometry() %>%
+#   select(id, msa_GEOID) %>%
+#   # filter(id %in% holc_x_msa$id) %>% # used for testing
+#   arrange(id) %>%
+#   filter(
+#     !(id == 'CT_Waterbury_C2_C_1385'  & msa_GEOID == '45860') & # 35300 keep
+#     !(id == 'CT_Waterbury_C2_C_1386'  & msa_GEOID == '45860') & # 35300 keep
+#     !(id == 'CT_Waterbury_C7_C_1391'  & msa_GEOID == '45860') & # 35300 keep
+#     !(id == 'IA_Dubuque_D1_D_1976'    & msa_GEOID == '38420') & # 20220 keep
+#     !(id == 'NH_Manchester_B1_B_5377' & msa_GEOID == '18180') & # 413035 keep
+#     !(id == 'OH_Toledo_C1_C_7632'     & msa_GEOID == '33780') & # 45780 keep
+#     !(id == 'OH_Toledo_C10_C_7633'    & msa_GEOID == '33780') & # 45780 keep
+#     !(id == 'OH_Toledo_C2_C_7643'     & msa_GEOID == '33780') & # 45780 keep
+#     !(id == 'RI_Woonsocket_C4_C_8579' & msa_GEOID == '14460')   # 39300 keep
+#   ) %>% tibble -> holc_msa_keys
+# 
+# holc_msa_keys |>
+#   write_csv(paste0(getwd(), '/working_data/MSA/holc_msa_keys_',
+#                    gsub('[[:punct:]]', '-', Sys.time()),
+#                    '.csv'))
+
+(holc_msa_keys <-
+    read_csv(paste0(getwd()
+                    , '/working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv')
+             , col_types = 'cc')) # makes type = character
+
+# # hand the cleaned up assignment over to holc: don't commit yet
+# holc %>%
+#   left_join(., holc_msa_keys, by = 'id') %>%
+#   left_join(., msa_tbl_vars, by = 'msa_GEOID')
+
+# how many people live in these MSA's?
+holc_msa_keys |> distinct(msa_GEOID) -> msa_ids
+msa_tbl_vars |> 
+  filter(msa_GEOID %in% msa_ids$msa_GEOID) |> 
+  pull(msa_total_popE) |> 
+  sum()
+
+
+```
+
+### B link / filter CBGs to / by MSA's
+```{r}
+
+# get MSA's with holc polys
+msa_w_holc <- msa |>
+  filter(msa_GEOID %in% unique(holc_msa_keys$msa_GEOID)) |>
+  select(msa_GEOID, msa_name, area_msa_km2)
+
+msa_w_holc |> 
+  st_write(paste0(getwd()
+                  , '/working_data/MSA/msa_as_geopackage_'
+                  ,  gsub('[[:punct:]]', '-', Sys.time())
+                  , '.gpkg'))
+
+msa_w_holc <- 
+  st_read(paste0(getwd()
+                 , '/working_data/MSA/msa_as_geopackage_2022-12-08 15-40-07.gpkg'))
+
+msa_w_holc |> mapview()  
+
+```
+
+
+
+
+
+
+
