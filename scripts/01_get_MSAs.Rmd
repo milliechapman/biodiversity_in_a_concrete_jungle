@@ -159,6 +159,13 @@ tic(); (holc <-
                  , area_holc_km2 = as.double(st_area(.) / 1e+6)) %>% 
   select(id, global_id, state, city, holc_id, holc_grade, city_state, area_holc_km2));toc() # < 5 seconds
 
+# # save out for posterity
+# holc |> 
+#   st_write(paste0(getwd()
+#                   , '/working_data/holc_polys_saved/holc_plys_'
+#                   ,  gsub('[[:punct:]]', '-', Sys.time())
+#                   , '.gpkg'))
+
 
 # check uniqueness of IDs
 all.equal(n_distinct(holc$id), dim(holc)[1])
@@ -468,16 +475,16 @@ msa_tbl_vars |>
 ### B link / filter CBGs to / by MSA's
 ```{r}
 
-# get MSA's with holc polys
-msa_w_holc <- msa |>
-  filter(msa_GEOID %in% unique(holc_msa_keys$msa_GEOID)) |>
-  select(msa_GEOID, msa_name, area_msa_km2)
-
-msa_w_holc |> 
-  st_write(paste0(getwd()
-                  , '/working_data/MSA/msa_as_geopackage_'
-                  ,  gsub('[[:punct:]]', '-', Sys.time())
-                  , '.gpkg'))
+# # get MSA's with holc polys
+# msa_w_holc <- msa |>
+#   filter(msa_GEOID %in% unique(holc_msa_keys$msa_GEOID)) |>
+#   select(msa_GEOID, msa_name, area_msa_km2)
+# 
+# msa_w_holc |> 
+#   st_write(paste0(getwd()
+#                   , '/working_data/MSA/msa_as_geopackage_'
+#                   ,  gsub('[[:punct:]]', '-', Sys.time())
+#                   , '.gpkg'))
 
 msa_w_holc <- 
   st_read(paste0(getwd()
