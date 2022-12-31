@@ -1,0 +1,207 @@
+---
+title: "02_get_gbif"
+author: "Dexter H. Locke, PhD"
+date: "`r format(Sys.time())`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+based off of Millie's "holc-all-spp.R" but designed for laptop
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## 0 set up: load libraries, custom functions, set defaults
+```{r}
+
+# load libraries
+# packages we'll be using
+packs <- c(
+    'tidyverse'  # a must have
+  , 'gbifdb' # GBIF
+  # , 'fst' # a faster table 
+  # , 'terra'
+  , 'sf'              # spatial support
+  , 'mapview'         # webmaps
+  , 'tictoc'          # times things
+  , 'beepr'           # makes noises
+)
+
+
+# check for all of the libraries, install if you don't have them
+if (length(setdiff(packs, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packs, rownames(installed.packages())))  
+}
+
+# load them
+vapply(packs, library, character.only = TRUE, logical(1), logical.return = TRUE, quietly = TRUE)
+
+
+
+# set custom function for getting spatial data
+see_sf <- function(){
+# what's in memory that are sf - spatial features?
+keep(eapply(.GlobalEnv, class),      # gets the objects in the global environment
+     ~ any(str_detect(., "sf"))) %>% # selects elements with sf in them
+    names(.) %>% as.character(.)     # my simple features
+}
+
+see_sf() -> sf_in_memory
+
+# what are the spatial references of those SF classes?
+mget(sf_in_memory) %>% purrr::map(~st_crs(.x)$epsg) %>% unlist() #%>% View()
+
+
+# # get file size
+# for(obj in ls()){message(obj); print(object.size(get(obj)), units='auto'); cat('\n')}; rm(obj)
+
+# thanks Phil Donovan @philip_donovan
+# https://www.spatialanalytics.co.nz/post/2018/04/01/fixing-st-par/
+# Paralise any simple features analysis.
+st_parallel <- function(sf_df, sf_func, n_cores, ...){
+
+  # Create a vector to split the data set up by.
+  split_vector <- rep(1:n_cores, each = nrow(sf_df) / n_cores, length.out = nrow(sf_df))
+
+  # Perform GIS analysis
+  split_results <- split(sf_df, split_vector) %>%
+    parallel::mclapply(function(x) sf_func(x, ...), mc.cores = n_cores)
+
+
+  # Define the output_class. If length is greater than two, then grab the second variable.
+  output_class <- class(split_results[[1]])
+  if (length(output_class) == 2){
+    output_class <- output_class[2]
+  }
+
+  # Combine results back together. Method of combining depends on the output from the function.
+  if (output_class == "matrix"){
+    result <- do.call("rbind", split_results)
+    names(result) <- NULL
+  } else if (output_class == "sfc") {
+    result <- do.call("c", split_results)
+    result <- sf_func(result) # do.call combines the list but there are still n_cores of the geometry which had been split up. Running st_union or st_collect gathers them up into one, as is the expected output of these two functions.
+  } else if (output_class %in% c('list', 'sgbp') ){
+    result <- do.call("c", split_results)
+    names(result) <- NULL
+  } else if (output_class == "data.frame" ){
+    result <- do.call("rbind", split_results)
+  } else {
+    stop("Unknown class. st_parallel only accepts the following outputs at present: sfc, list, sf, matrix, sgbp.")
+  }
+
+  # Return result
+  return(result)
+}
+
+
+# custom function for "Not In"
+`%nin%` <- Negate(`%in%`)
+
+
+
+# fixes mapview
+mapviewOptions(fgb = FALSE)
+
+```
+
+# 1 connectd to database
+```{r}
+
+db <- gbif_remote()
+# # I use a local version of gbif but should work as well with the above code
+# # db <- gbif_remote(bucket="gbif", 
+# #                   endpoint_override = "minio.cirrus.carlboettiger.info", 
+# #                   version="2022-03-01")
+# 
+```
+
+# 2 sample query
+```{r}
+
+# # works
+# # grab all occurances in US, count by lat long and class of app
+# tic(); US_spp <- db |>
+#   filter(countrycode == "US") |>
+#   count(class, decimallatitude, decimallongitude) |>
+#   collect(); toc(); beep() # ~15 mins
+
+# TIP: load up count with year, collectionCode, institutionCode, basisofrecord then filter?
+
+# # what are the column names available?
+# tic(); (test_col_names <- 
+#   db |>
+#   filter(countrycode == "US") |> 
+#   names()); toc(); beep() # lightening fast, nano seconds
+
+# # DOES NOT WORK - don't know the values for stateprovince!
+# tic(); (test_download <- 
+#   db |>
+#   filter(countrycode == "US") |> 
+#   filter(stateprovince == "RI") |> 
+#   collect()); toc(); beep() # 40 mins and empty
+
+
+class_to_keep <- c('Aves', 'Insecta', 'Mammalia', 'Reptilia', 'Amphibia')
+
+tic(); (test_download <- 
+          db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom - needed?
+              class
+            , year
+            , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(class %in% class_to_keep) |>    # only classes of interest
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          # combine/reclass data provider here?
+          count(  class
+                , year
+                , basisofrecord
+                , collectioncode
+                , institutioncode
+                , decimallatitude, decimallongitude
+                ) |> 
+          collect()
+        ); toc(); beep() # 36 mins without count, ~9 mins with count
+
+test_download |> distinct(basisofrecord)
+test_download |> distinct(collectioncode)
+test_download |> distinct(institutioncode)
+
+test_download |> 
+  as_tibble() |> 
+  write_csv(paste0(getwd()
+                   , "/working_data/gbif_download/"
+                   , 'test_'
+                   , Sys.Date()
+                   , '.csv')
+            )
+
+# # try to write out?
+# test_download |> 
+#   fst::write_fst(
+#     paste0(getwd(), "/working_data/gbif_download/test_download.fst"))
+# 
+# 
+# (test_download <- fst::read.fst("test_download.fst") |> tibble())
+# 
+# 
+# (test_download <- fst::read.fst(paste0(getwd(), "/working_data/gbif_download/test_download.fst")) |> tibble())
+
+```
+
+
+## 2 bring HOLC polygons
+```{r}
+
+```
+
