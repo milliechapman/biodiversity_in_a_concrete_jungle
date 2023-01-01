@@ -1,0 +1,486 @@
+---
+title: "03_filter_gbif_by_MSAs"
+author: "Dexter H. Locke, PhD"
+date: "`r format(Sys.time())`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+based off of Millie's "holc-all-spp.R" but designed for laptop
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# 0 set up: load libraries, custom functions, set defaults
+```{r}
+
+# load libraries
+# packages we'll be using
+packs <- c(
+    'tidyverse'  # a must have
+  , 'tidylog'    # prints out what was done in dplyr and tidr
+  # , 'gbifdb' # GBIF
+  # , 'fst' # a faster table 
+  # , 'terra'
+  , 'sf'              # spatial support
+  , 'mapview'         # webmaps
+  , 'janitor'   # cleans things up, also pipe-friendly cross-tabulations
+  , 'tictoc'          # times things
+  , 'beepr'           # makes noises
+)
+
+
+# check for all of the libraries, install if you don't have them
+if (length(setdiff(packs, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packs, rownames(installed.packages())))  
+}
+
+# load them
+vapply(packs, library, character.only = TRUE, logical(1), logical.return = TRUE, quietly = TRUE)
+
+
+
+# set custom function for getting spatial data
+see_sf <- function(){
+# what's in memory that are sf - spatial features?
+keep(eapply(.GlobalEnv, class),      # gets the objects in the global environment
+     ~ any(str_detect(., "sf"))) %>% # selects elements with sf in them
+    names(.) %>% as.character(.)     # my simple features
+}
+
+see_sf() -> sf_in_memory
+
+# what are the spatial references of those SF classes?
+mget(sf_in_memory) %>% purrr::map(~st_crs(.x)$epsg) %>% unlist() #%>% View()
+
+
+# # get file size
+# for(obj in ls()){message(obj); print(object.size(get(obj)), units='auto'); cat('\n')}; rm(obj)
+
+# thanks Phil Donovan @philip_donovan
+# https://www.spatialanalytics.co.nz/post/2018/04/01/fixing-st-par/
+# Paralise any simple features analysis.
+st_parallel <- function(sf_df, sf_func, n_cores, ...){
+
+  # Create a vector to split the data set up by.
+  split_vector <- rep(1:n_cores, each = nrow(sf_df) / n_cores, length.out = nrow(sf_df))
+
+  # Perform GIS analysis
+  split_results <- split(sf_df, split_vector) %>%
+    parallel::mclapply(function(x) sf_func(x, ...), mc.cores = n_cores)
+
+
+  # Define the output_class. If length is greater than two, then grab the second variable.
+  output_class <- class(split_results[[1]])
+  if (length(output_class) == 2){
+    output_class <- output_class[2]
+  }
+
+  # Combine results back together. Method of combining depends on the output from the function.
+  if (output_class == "matrix"){
+    result <- do.call("rbind", split_results)
+    names(result) <- NULL
+  } else if (output_class == "sfc") {
+    result <- do.call("c", split_results)
+    result <- sf_func(result) # do.call combines the list but there are still n_cores of the geometry which had been split up. Running st_union or st_collect gathers them up into one, as is the expected output of these two functions.
+  } else if (output_class %in% c('list', 'sgbp') ){
+    result <- do.call("c", split_results)
+    names(result) <- NULL
+  } else if (output_class == "data.frame" ){
+    result <- do.call("rbind", split_results)
+  } else {
+    stop("Unknown class. st_parallel only accepts the following outputs at present: sfc, list, sf, matrix, sgbp.")
+  }
+
+  # Return result
+  return(result)
+}
+
+
+# Paralise any simple features analysis.
+# https://www.spatialanalytics.co.nz/post/2017/09/11/a-parallel-function-for-spatial-analysis-in-r/
+# define
+st_par <- function(sf_df, sf_func, n_cores, ...){
+  # Create a vector to split the data set up by.
+  split_vector <- rep(1:n_cores, each = nrow(sf_df) / n_cores, length.out = nrow(sf_df))
+  
+  # Perform GIS analysis
+  split_results <- split(sf_df, split_vector) %>%
+    parallel::mclapply(function(x) sf_func(x, ...), mc.cores = n_cores)
+  
+  # Combine results back together. Method of combining depends on the output from the function.
+  if (class(split_results[[1]]) == 'list' ){
+    result <- do.call("c", split_results)
+    names(result) <- NULL
+    } else {
+      result <- do.call("rbind", split_results)
+      }
+  # Return result
+  return(result)
+  }
+
+# custom function for "Not In"
+`%nin%` <- Negate(`%in%`)
+
+
+# redlining colors
+holc_pal <- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              #, '#A9A9A9'
+              ) # dark gray)
+
+holc_pal_f<- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              , '#A9A9A9'
+              , '#000000')
+
+# fixes mapview
+mapviewOptions(fgb = FALSE)
+
+# sf::sf_use_s2(FALSE) # supresses error in some sf opperations, probably not needed?
+
+```
+
+
+# 1 read in spatial data
+## A MSAs
+```{r}
+msa_w_holc <- 
+  st_read(paste0(getwd()
+                 , '/working_data/MSA/msa_as_geopackage_2022-12-08 15-40-07.gpkg'))
+
+msa_w_holc |> mapview()  
+
+```
+
+## B holc polygons
+```{r}
+
+# sf::sf_use_s2(FALSE) # supresses error about invalid loops in 1212, 2851
+# # https://stackoverflow.com/questions/68478179/how-to-resolve-spherical-geometry-failures-when-joining-spatial-data
+# 
+# tic(); (holc <- 
+#           st_read("https://dsl.richmond.edu/panorama/redlining/static/fullDownload.geojson") |> 
+#           # st_read('input_data/HOLC_shapefile/holc_ad_data.shp', as_tibble = TRUE) |> 
+#           filter(!is.na(holc_grade) & holc_grade != 'E') %>%
+#           st_cast('POLYGON') %>% # IMPORTANT
+#           filter(!st_is_empty(.)) %>% 
+#           st_make_valid(.) %>% 
+#           rowid_to_column() %>% 
+#           rowid_to_column(var = 'global_id') %>% 
+#           # rowid_to_column(var = 'internal_id') %>% # TODO get this squeeky clean
+#           mutate(  id = paste(state, city, holc_id, holc_grade, rowid, sep = '_')
+#                  , city_state = paste0(city, ', ', state)
+#                  , area_holc_km2 = as.double(st_area(.) / 1e+6)) %>% 
+#   select(id, global_id, state, city, holc_id, holc_grade, city_state, area_holc_km2));toc() # < 5 seconds
+
+# *** OR ***
+(holc <- st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg'))
+
+
+# map holc polygons and MSA
+holc |> 
+  # too many polygons at once.. filter by a state
+  # filter(state == 'CA') |> 
+  # filter(state == 'NY') |> 
+  # filter(state == 'MA') |> 
+  mapview(zcol =   'holc_grade'
+                , col.regions = holc_pal) +
+  mapview(msa_w_holc, alpha.regions = 0) # clear polygon, black boarder
+  
+# rm(holc)
+```
+
+
+## C GBIF
+### i fungi - as test case
+```{r eval=FALSE, include=FALSE}
+
+(fungi <- read_csv('../biodiversity_in_a_concrete_jungle_data_too_big/download_fungi_2022-12-31.csv') |> mutate(taxon = 'Fungi', .before = 1))
+
+# spatilize, possible combine with previous step?
+sf_fungi <- 
+  fungi |> 
+  # sample_n(10000) |>
+  # sample_n(1e5) |>
+  st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+
+# map! FIXME: ECUADOR?!!? POINTS IN WATE?
+sf_fungi |> 
+  # sample_n(10000) |>
+  mapview(zcol = 'year') 
+
+# # spatially join GBIF to MSAs
+# # serial - works fine for small number of points or small polygons (holc)
+# tic(); (gbif_fungi_MSA <- st_join(sf_fungi, msa_w_holc, join = st_within)); toc() # < 3s w 10k points 
+
+# parallel
+tic(); (gbif_fungi_MSA <- st_par(  sf_fungi
+                                 , msa_w_holc
+                                 , n_cores = 10
+                                 , sf_func = st_join
+                                 , join = st_within)); toc() # ~53s w 1M points and 10 cores
+# 2x checks
+gbif_fungi_MSA |> glimpse()
+gbif_fungi_MSA |> tabyl(msa_name)
+
+# map - CAREFUL, NOT WITH FULL DATA
+gbif_fungi_MSA |> 
+  filter(!is.na(msa_name)) |> # cut the obs NOT in the MSA's, drops down to ~574k
+  sample_frac(.01) |>         # for speed
+  mapview(zcol = 'msa_name') + 
+  mapview(msa_w_holc, alpha.regions = 0) + # clear polygon, black boarder
+  mapview(holc
+          , zcol =   'holc_grade'
+          , col.regions = holc_pal)
+
+# # write out. As a gpkg the file was 115 MB(!) as a csv with coordinates in columns it is 80.9 MB
+# gbif_fungi_MSA |> 
+#   tidylog::filter(!is.na(msa_name)) |> # cut the obs NOT in the MSA's, drops down to ~574k
+#   st_write(paste0(
+#     '../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_MSA_', Sys.Date(), '.csv')
+#     , layer_options = "GEOMETRY=AS_XY") # converts geometry to x and y cols
+#  # st_write(paste0(
+#  #   '../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fung_MSA_', Sys.Date(), '.gpkg'))
+
+# HALF the size as csv
+gbif_fungi_MSA %>%
+  tidylog::filter(!is.na(msa_name)) %>%
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_MSA_', Sys.Date(), '.fst'))
+
+# clean up
+rm(fungi, sf_fungi, gbif_fungi_MSA); gc()
+
+```
+
+### ii plants
+```{r}
+
+(sf_plantae <- # 8.5 million records
+   read_csv('../biodiversity_in_a_concrete_jungle_data_too_big/download_plantae_2022-12-31.csv') |>
+   mutate(taxon = 'Plantae', .before = 1) |> 
+   st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+ )
+
+# map! 
+sf_plantae |> 
+  sample_n(1e4) |>
+  mapview(zcol = 'year') 
+
+# # spatially join GBIF to MSAs
+# parallel
+tic(); (gbif_plantae_MSA <- 
+          st_par(  sf_plantae
+                 , msa_w_holc
+                 , n_cores = 12
+                 , sf_func = st_join
+                 , join = st_within)); toc() # ~140s w 8.5M points and 12 cores
+
+# 2x checks
+gbif_plantae_MSA |> glimpse()
+gbif_plantae_MSA |> tabyl(msa_name)
+
+  
+# # write out. ~620Mb
+# gbif_plantae_MSA |> 
+#   tidylog::filter(!is.na(msa_name)) |> # cut the obs NOT in the MSA's, drops ~half
+#   st_write(paste0(
+#     '../biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_MSA_', Sys.Date(), '.csv')
+#     , layer_options = "GEOMETRY=AS_XY") # converts geometry to x and y cols
+#  # st_write(paste0(
+#  #   '../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fung_MSA_', Sys.Date(), '.gpkg'))
+
+# using fst it is half! 311Mb
+gbif_plantae_MSA %>%
+  tidylog::filter(!is.na(msa_name)) %>%
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_MSA_'
+                        , Sys.Date(), '.fst'))
+
+rm(sf_plantae, gbif_plantae_MSA)
+```
+
+### iii aves..
+
+### iv insecta
+```{r}
+
+(sf_insecta <- # ~4.1 million records
+   read_csv('../biodiversity_in_a_concrete_jungle_data_too_big/download_insecta_2022-12-31.csv') |>
+   mutate(taxon = 'Insecta', .before = 1) |> 
+   st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+ )
+
+# map! 
+sf_insecta |> 
+  sample_n(1e4) |>
+  mapview(zcol = 'year') 
+
+# # spatially join GBIF to MSAs
+# parallel
+tic(); (gbif_insecta_MSA <- 
+          st_par(  sf_insecta
+                 , msa_w_holc
+                 , n_cores = 12
+                 , sf_func = st_join
+                 , join = st_within)); toc() # ~50s w 4.1M points and 12 cores
+
+# 2x checks
+gbif_insecta_MSA |> glimpse()
+gbif_insecta_MSA |> tabyl(msa_name)
+
+  
+# write out using fst ~150Mb
+gbif_insecta_MSA %>%
+  tidylog::filter(!is.na(msa_name)) %>% # ~1.85M remaining
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_insecta_MSA_'
+                        , Sys.Date(), '.fst'))
+
+rm(sf_insecta, gbif_insecta_MSA)
+```
+
+### v mammalia
+```{r}
+
+(sf_mammalia <- # ~1 million records
+   read_csv('../biodiversity_in_a_concrete_jungle_data_too_big/download_mammalia_2022-12-31.csv') |>
+   mutate(taxon = 'Mammalia', .before = 1) |> 
+   st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+ )
+
+# map! 
+sf_mammalia |> 
+  sample_n(1e4) |>
+  mapview(zcol = 'year') 
+
+# # spatially join GBIF to MSAs
+# parallel
+tic(); (gbif_mammalia_MSA <- 
+          st_par(  sf_mammalia
+                 , msa_w_holc
+                 , n_cores = 12
+                 , sf_func = st_join
+                 , join = st_within)); toc() # ~10s w ~1M points and 12 cores
+
+# 2x checks
+gbif_mammalia_MSA |> glimpse()
+gbif_mammalia_MSA |> tabyl(msa_name)
+
+  
+# write out using fst ~16Mb
+gbif_mammalia_MSA %>%
+  tidylog::filter(!is.na(msa_name)) %>% # ~225k remaining
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_mammalia_MSA_'
+                        , Sys.Date(), '.fst'))
+
+rm(sf_mammalia, gbif_mammalia_MSA)
+```
+
+### vi reptilia ..
+
+### vii amphibia
+```{r}
+
+(sf_amphibia <- # 300k records
+   read_csv('../biodiversity_in_a_concrete_jungle_data_too_big/download_amphibia_2022-12-31.csv') |>
+   mutate(taxon = 'Amphibia', .before = 1) |> 
+   st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+ )
+
+# map! 
+sf_amphibia |> 
+  sample_n(1e4) |>
+  mapview(zcol = 'year') 
+
+# # spatially join GBIF to MSAs
+# parallel
+tic(); (gbif_amphibia_MSA <- 
+          st_par(  sf_amphibia
+                 , msa_w_holc
+                 , n_cores = 12
+                 , sf_func = st_join
+                 , join = st_within)); toc() # ~4s w ~300k points and 12 cores
+
+# 2x checks
+gbif_amphibia_MSA |> glimpse()
+gbif_amphibia_MSA |> tabyl(msa_name)
+
+  
+# write out using fst ~10Mb
+gbif_amphibia_MSA %>%
+  tidylog::filter(!is.na(msa_name)) %>% # ~174k remaining
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_amphibia_MSA_'
+                        , Sys.Date(), '.fst'))
+
+rm(sf_amphibia, gbif_amphibia_MSA)
+```
+
+
+## End
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -14,7 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-## 0 set up: load libraries, custom functions, set defaults
+# 0 set up: load libraries, custom functions, set defaults
 ```{r}
 
 # load libraries
@@ -26,6 +26,7 @@ packs <- c(
   # , 'terra'
   , 'sf'              # spatial support
   , 'mapview'         # webmaps
+  , 'janitor'   # cleans things up, also pipe-friendly cross-tabulations
   , 'tictoc'          # times things
   , 'beepr'           # makes noises
 )
@@ -119,24 +120,23 @@ db <- gbif_remote()
 # 
 ```
 
-# 2 sample query
-```{r}
-
+# 2 sample query - sandbox for working out the queries
+```{r eval=FALSE, include=FALSE}
 # # works
 # # grab all occurances in US, count by lat long and class of app
 # tic(); US_spp <- db |>
 #   filter(countrycode == "US") |>
 #   count(class, decimallatitude, decimallongitude) |>
 #   collect(); toc(); beep() # ~15 mins
-
+# 
 # TIP: load up count with year, collectionCode, institutionCode, basisofrecord then filter?
-
+# 
 # # what are the column names available?
 # tic(); (test_col_names <- 
 #   db |>
 #   filter(countrycode == "US") |> 
 #   names()); toc(); beep() # lightening fast, nano seconds
-
+# 
 # # DOES NOT WORK - don't know the values for stateprovince!
 # tic(); (test_download <- 
 #   db |>
@@ -144,9 +144,7 @@ db <- gbif_remote()
 #   filter(stateprovince == "RI") |> 
 #   collect()); toc(); beep() # 40 mins and empty
 
-
 class_to_keep <- c('Aves', 'Insecta', 'Mammalia', 'Reptilia', 'Amphibia')
-
 tic(); (test_download <- 
           db |>
           filter(countrycode == "US") |> 
@@ -172,20 +170,17 @@ tic(); (test_download <-
                 ) |> 
           collect()
         ); toc(); beep() # 36 mins without count, ~9 mins with count
-
 test_download |> distinct(basisofrecord)
 test_download |> distinct(collectioncode)
 test_download |> distinct(institutioncode)
-
 test_download |> 
   as_tibble() |> 
   write_csv(paste0(getwd()
-                   , "/working_data/gbif_download/"
+                   , "/working_data/gbif_download/" # should write to large file directory not for sharing
                    , 'test_'
                    , Sys.Date()
                    , '.csv')
             )
-
 # # try to write out?
 # test_download |> 
 #   fst::write_fst(
@@ -196,12 +191,439 @@ test_download |>
 # 
 # 
 # (test_download <- fst::read.fst(paste0(getwd(), "/working_data/gbif_download/test_download.fst")) |> tibble())
+```
 
+## A PLANTS
+```{r eval=FALSE, include=FALSE}
+
+# keep_king <- c('Plantae', 'Fungi')
+# keep_class<- c('Aves', 'Insecta', 'Mammalia', 'Reptilia', 'Amphibia')
+
+tic(); (download_plantae <- 
+          db |>
+          filter(countrycode == "US") |> 
+          select(
+              kingdom
+            , class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          filter(year >= 2000 & year <= 2020) |> # recent, please
+          # king/classes of interest
+          filter(kingdom == 'Plantae') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect()
+        ); toc(); beep() # ~5 mins
+
+# a few double checks
+download_plantae # ~8.5M records
+download_plantae |> glimpse()
+download_plantae |> tabyl(year)   # growing over time
+download_plantae |> tabyl(source) # ~61% from iNaturalist
+download_plantae |> tabyl(n_obs)
+download_plantae |> arrange(desc(n_obs))
+
+# # write it out ~0.5Gb
+# download_plantae |> 
+#   write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_plantae_'
+#             , Sys.Date()
+#             , '.csv'
+#             ))
+# rm(download_plantae)
 ```
 
 
-## 2 bring HOLC polygons
+## B FUNGI
+```{r eval=FALSE, include=FALSE}
+
+# keep_king <- c('Plantae', 'Fungi')
+# keep_class<- c('Aves', 'Insecta', 'Mammalia', 'Reptilia', 'Amphibia')
+
+tic(); (download_fungi <- 
+          db |>
+          filter(countrycode == "US") |> 
+          select(
+              kingdom
+            , class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          filter(year >= 2000 & year <= 2020) |> # recent, please
+          # king/classes of interest
+          filter(kingdom == 'Fungi') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect()
+        ); toc(); beep() # ~5 mins
+
+# a few double checks
+download_fungi # ~1M records
+download_fungi |> glimpse()
+download_fungi |> tabyl(year)
+download_fungi |> tabyl(source)
+download_fungi |> tabyl(n_obs)
+download_fungi |> arrange(desc(n_obs))
+
+# # write it out
+# download_fungi |> # ~62Mb
+#   write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_fungi_'
+#             , Sys.Date()
+#             , '.csv'
+#             ))
+# rm(download_fungi)
+```
+
+
+## C AVES - too big?
 ```{r}
 
+# keep_king <- c('Plantae', 'Fungi')
+# keep_class<- c('Aves', 'Insecta', 'Mammalia', 'Reptilia', 'Amphibia')
+
+tic(); (download_aves <- 
+          db |>
+          filter(countrycode == "US") |> 
+          select(
+              kingdom
+            , class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          filter(year >= 2000 & year <= 2020) |> # recent, please
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            # , year    # NOTICE THIS IS TURNED OFF
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+                ) |> 
+          collect()
+        ); toc(); beep() # ~tk mins
+
+# a few double checks
+download_aves
+download_aves |> glimpse()
+download_aves |> tabyl(year)
+download_aves |> tabyl(source)
+download_aves |> tabyl(n)
+
+# write it out
+download_aves |> 
+  write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_no_year_'
+            , Sys.Date()
+            , '.csv'
+            ))
+
 ```
 
+
+## D INSECTA
+```{r eval=FALSE, include=FALSE}
+
+# keep_king <- c('Plantae', 'Fungi')
+# keep_class<- c('Aves', 'Insecta', 'Mammalia', 'Reptilia', 'Amphibia')
+
+tic(); (download_insecta <- 
+          db |>
+          filter(countrycode == "US") |> 
+          select(
+              kingdom
+            , class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          filter(year >= 2000 & year <= 2020) |> # recent, please
+          # king/classes of interest
+          filter(class == 'Insecta') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+            ) |> 
+          collect()
+        ); toc(); beep() # ~6 mins
+
+# a few double checks
+download_insecta # ~4.1M records
+download_insecta |> glimpse()
+download_insecta |> tabyl(year) # growth over time..
+download_insecta |> tabyl(source) # 70% iNat
+download_insecta |> tabyl(n_obs)
+download_insecta |> arrange(desc(n_obs))
+
+# # write it out, ~27Mb
+# download_insecta |> 
+#   write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_insecta_'
+#             , Sys.Date()
+#             , '.csv'
+#             ))
+# rm(download_insecta)
+```
+
+
+## E MAMMALIA
+```{r eval=FALSE, include=FALSE}
+
+# keep_king <- c('Plantae', 'Fungi')
+# keep_class<- c('Aves', 'Insecta', 'Mammalia', 'Reptilia', 'Amphibia')
+
+tic(); (download_mammalia <- 
+          db |>
+          filter(countrycode == "US") |> 
+          select(
+              kingdom
+            , class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          filter(year >= 2000 & year <= 2020) |> # recent, please
+          # king/classes of interest
+          filter(class == 'Mammalia') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect()
+        ); toc(); beep() # ~5 mins
+
+# a few double checks
+download_mammalia # ~1M records
+download_mammalia |> glimpse()
+download_mammalia |> tabyl(year)   # not *every* year has more than prior yer!
+download_mammalia |> tabyl(source) # ~42% iNat
+download_mammalia |> tabyl(n_obs)
+download_mammalia |> arrange(desc(n_obs))
+
+# # write it out, ~70Mb
+# download_mammalia |> 
+#   write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_mammalia_'
+#             , Sys.Date()
+#             , '.csv'
+#             ))
+# rm(download_mammalia)
+```
+
+
+## F REPTILIA - empty?
+```{r}
+
+# keep_king <- c('Plantae', 'Fungi')
+# keep_class<- c('Aves', 'Insecta', 'Mammalia', 'Reptilia', 'Amphibia')
+
+tic(); (download_reptilia <- 
+          db |>
+          filter(countrycode == "US") |> 
+          select(
+              kingdom
+            , class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          filter(year >= 2000 & year <= 2020) |> # recent, please
+          # king/classes of interest
+          filter(class == 'Reptilia') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect()
+        ); toc(); beep() # ~5 mins
+
+# a few double checks
+download_reptilia
+download_reptilia |> glimpse()
+download_reptilia |> tabyl(year)
+download_reptilia |> tabyl(source)
+download_reptilia |> tabyl(n_obs)
+download_reptilia |> arrange(desc(n_obs))
+
+# write it out
+download_reptilia |> 
+  write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_reptilia_'
+            , Sys.Date()
+            , '.csv'
+            ))
+rm(download_reptilia)
+```
+
+
+## G AMPHIBIA
+```{r}
+
+# keep_king <- c('Plantae', 'Fungi')
+# keep_class<- c('Aves', 'Insecta', 'Mammalia', 'Reptilia', 'Amphibia')
+
+tic(); (download_amphibia <- 
+          db |>
+          filter(countrycode == "US") |> 
+          select(
+              kingdom
+            , class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          filter(year >= 2000 & year <= 2020) |> # recent, please
+          # king/classes of interest
+          filter(class == 'Amphibia') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect()
+        ); toc(); beep() # ~6 mins
+
+# a few double checks
+download_amphibia # ~300k records
+download_amphibia |> glimpse()
+download_amphibia |> tabyl(year)
+download_amphibia |> tabyl(source) # 87% iNaturalist
+download_amphibia |> tabyl(n_obs)
+download_amphibia |> arrange(desc(n_obs))
+
+# # write it out, ~21Mb
+# download_amphibia |> 
+#   write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_amphibia_'
+#             , Sys.Date()
+#             , '.csv'
+#             ))
+# rm(download_amphibia)
+
+
+```
+
+## End
