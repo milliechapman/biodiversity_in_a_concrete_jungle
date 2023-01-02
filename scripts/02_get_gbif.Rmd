@@ -22,7 +22,7 @@ knitr::opts_chunk$set(echo = TRUE)
 packs <- c(
     'tidyverse'  # a must have
   , 'gbifdb' # GBIF
-  # , 'fst' # a faster table 
+  , 'fst' # a faster table, makes outputs files much smaller, too.
   # , 'terra'
   , 'sf'              # spatial support
   , 'mapview'         # webmaps
@@ -246,10 +246,10 @@ download_plantae |> tabyl(n_obs)
 download_plantae |> arrange(desc(n_obs))
 
 # # write it out ~0.5Gb
-# download_plantae |> 
-#   write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_plantae_'
+# download_plantae |>
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_plantae_'
 #             , Sys.Date()
-#             , '.csv'
+#             , '.fst'
 #             ))
 # rm(download_plantae)
 ```
@@ -308,27 +308,84 @@ download_fungi |> tabyl(n_obs)
 download_fungi |> arrange(desc(n_obs))
 
 # # write it out
-# download_fungi |> # ~62Mb
-#   write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_fungi_'
+# download_fungi |> # ~44Mb
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_fungi_'
 #             , Sys.Date()
-#             , '.csv'
+#             , '.fst'
 #             ))
 # rm(download_fungi)
 ```
 
 
-## C AVES - too big?
+## C AVES - too big? Aaack
+```{r eval=FALSE, include=FALSE}
+# 
+# # keep_king <- c('Plantae', 'Fungi')
+# # keep_class<- c('Aves', 'Insecta', 'Mammalia', 'Reptilia', 'Amphibia')
+# 
+# tic(); (download_aves_2020 <- 
+#           db |>
+#           filter(countrycode == "US") |> 
+#           select(
+#             #   kingdom
+#               class
+#             , genus
+#             , species
+#             , year
+#             # , basisofrecord    # to drop 'unknown'?
+#             , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+#             , institutioncode  # has iNaturalist
+#             , decimallatitude, decimallongitude
+#             ) |>
+#           # filter(year >= 2000 & year <= 2020) |> # recent, please
+#           filter(year >= 2015 & year <= 2020) |> # recent, please
+#           # king/classes of interest
+#           filter(class == 'Aves') |> 
+#           filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+#           mutate(source = 
+#                    case_when(
+#                      str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+#                      str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+#                      TRUE ~ 'other')
+#                  ) |> 
+#           count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+#               genus
+#             , species
+#             , year
+#             # , basisofrecord
+#             # , collectioncode
+#             # , institutioncode
+#             , source
+#             , decimallatitude, decimallongitude
+#             , name = 'n_obs'
+#                 ) |> 
+#           collect()
+#         ); toc(); beep() # ~tk mins
+# 
+# # a few double checks
+# download_aves_2015_2020
+# download_aves_2015_2020 |> glimpse()
+# download_aves_2015_2020 |> tabyl(year) # !!!
+# download_aves_2015_2020 |> tabyl(source)
+# download_aves_2015_2020 |> tabyl(n)
+# 
+# # write it out
+# download_aves |> fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2015_2020_'
+#             , Sys.Date()
+#             , '.csv'
+#             ))
+
+```
+
+### year 2000
 ```{r}
 
-# keep_king <- c('Plantae', 'Fungi')
-# keep_class<- c('Aves', 'Insecta', 'Mammalia', 'Reptilia', 'Amphibia')
-
-tic(); (download_aves <- 
-          db |>
-          filter(countrycode == "US") |> 
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |>
           select(
-              kingdom
-            , class
+              # kingdom
+             class
             , genus
             , species
             , year
@@ -337,7 +394,102 @@ tic(); (download_aves <-
             , institutioncode  # has iNaturalist
             , decimallatitude, decimallongitude
             ) |>
-          filter(year >= 2000 & year <= 2020) |> # recent, please
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2000) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |>
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source =
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |>
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |>
+          collect() |>
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2000_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~11 mins, ~1M records
+
+```
+
+### year 2001
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |>
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2001) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |>
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source =
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |>
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |>
+          collect() |>
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2001_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~12k mins, ~1M records
+
+```
+
+### year 2002
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2002) |> # ONLY A SINGLE YEAR
           # king/classes of interest
           filter(class == 'Aves') |> 
           filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
@@ -350,29 +502,866 @@ tic(); (download_aves <-
           count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
               genus
             , species
-            # , year    # NOTICE THIS IS TURNED OFF
+            , year
             # , basisofrecord
             # , collectioncode
             # , institutioncode
             , source
             , decimallatitude, decimallongitude
+            , name = 'n_obs'
                 ) |> 
-          collect()
-        ); toc(); beep() # ~tk mins
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2002_'
+                        , Sys.Date(), '.fst'))
 
-# a few double checks
-download_aves
-download_aves |> glimpse()
-download_aves |> tabyl(year)
-download_aves |> tabyl(source)
-download_aves |> tabyl(n)
+        ); toc(); beep() # ~tk mins, ~1 tk records
 
-# write it out
-download_aves |> 
-  write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_no_year_'
-            , Sys.Date()
-            , '.csv'
-            ))
+```
+
+### year 2003
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2003) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2003_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~tk mins, ~1 tk records
+
+```
+
+### year 2004
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2004) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2004_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~1.4M records
+
+```
+
+### year 2005
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2005) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2005_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~1.6M records
+
+```
+
+### year 2006
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2006) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2006_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~2M records
+
+```
+
+### year 2007
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2007) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2007_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~2.3M records
+
+```
+
+### year 2008
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2008) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2008_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~2.7 records
+
+```
+
+### year 2009
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2009) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2009_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~3.3M records
+
+```
+
+### year 2010
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2010) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2010_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~3.6M records
+
+```
+
+
+### year 2011
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |>
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2011) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |>
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source =
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |>
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |>
+          collect() |>
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2011_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~10 mins, ~4.3M records
+
+```
+
+### year 2012
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2012) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2012_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~5.7 records
+
+```
+
+### year 2013
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2013) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2013_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~7M records
+
+```
+
+### year 2014
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2014) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2014_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~8.1M records
+
+```
+
+### year 2015
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2015) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2015_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~9.2M records
+
+```
+
+### year 2016
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2016) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2016_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~10.6M records
+
+```
+
+### year 2017
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2017) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2017_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~12.2M records
+
+```
+
+### year 2018
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2018) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2018_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~14.2 records
+
+```
+
+### year 2019
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2019) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2019_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~15 mins, ~15.7M records
+
+```
+
+### year 2020
+```{r}
+
+# writing directly out without loading into memory first
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              # kingdom
+             class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          # filter(year >= 2000 & year <= 2020) |> # recent, please
+          filter(year == 2020) |> # ONLY A SINGLE YEAR
+          # king/classes of interest
+          filter(class == 'Aves') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_2020_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~12 mins, ~20.2M records
 
 ```
 
@@ -429,13 +1418,13 @@ download_insecta |> tabyl(source) # 70% iNat
 download_insecta |> tabyl(n_obs)
 download_insecta |> arrange(desc(n_obs))
 
-# # write it out, ~27Mb
-# download_insecta |> 
-#   write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_insecta_'
-#             , Sys.Date()
-#             , '.csv'
-#             ))
-# rm(download_insecta)
+# write it out, ~200Mb
+download_insecta |>
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_insecta_'
+            , Sys.Date()
+            , '.fst'
+            ))
+rm(download_insecta)
 ```
 
 
@@ -491,17 +1480,17 @@ download_mammalia |> tabyl(source) # ~42% iNat
 download_mammalia |> tabyl(n_obs)
 download_mammalia |> arrange(desc(n_obs))
 
-# # write it out, ~70Mb
-# download_mammalia |> 
-#   write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_mammalia_'
+# # write it out, ~36Mb
+# download_mammalia |>
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_mammalia_'
 #             , Sys.Date()
-#             , '.csv'
+#             , '.fst'
 #             ))
 # rm(download_mammalia)
 ```
 
 
-## F REPTILIA - empty?
+## F REPTILIA (AKA Squamata!)
 ```{r}
 
 # keep_king <- c('Plantae', 'Fungi')
@@ -523,7 +1512,8 @@ tic(); (download_reptilia <-
             ) |>
           filter(year >= 2000 & year <= 2020) |> # recent, please
           # king/classes of interest
-          filter(class == 'Reptilia') |> 
+          filter(class == 'Squamata') |> 
+          # filter(class == 'Reptilia') |> 
           filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
           mutate(source = 
                    case_when(
@@ -553,13 +1543,13 @@ download_reptilia |> tabyl(source)
 download_reptilia |> tabyl(n_obs)
 download_reptilia |> arrange(desc(n_obs))
 
-# write it out
-download_reptilia |> 
-  write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_reptilia_'
-            , Sys.Date()
-            , '.csv'
-            ))
-rm(download_reptilia)
+# # write it out, ~20Mb
+# download_reptilia |> 
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_reptilia_'
+#             , Sys.Date()
+#             , '.fst'
+#             ))
+# rm(download_reptilia)
 ```
 
 
@@ -605,7 +1595,7 @@ tic(); (download_amphibia <-
             , name = 'n_obs'
                 ) |> 
           collect()
-        ); toc(); beep() # ~6 mins
+        ); toc(); beep() # ~5 mins
 
 # a few double checks
 download_amphibia # ~300k records
@@ -615,15 +1605,67 @@ download_amphibia |> tabyl(source) # 87% iNaturalist
 download_amphibia |> tabyl(n_obs)
 download_amphibia |> arrange(desc(n_obs))
 
-# # write it out, ~21Mb
-# download_amphibia |> 
-#   write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_amphibia_'
+# # write it out, ~13Mb
+# download_amphibia |>
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_amphibia_'
 #             , Sys.Date()
-#             , '.csv'
+#             , '.fst'
 #             ))
 # rm(download_amphibia)
 
 
 ```
+
+
+# SANDBOX BELOW
+
+## Test writing directly out without loading the data into memory - for AVES, but using Amphibia as training wheels
+```{r}
+# WORKED GREAT
+
+# try writing directly out without loading into memory first
+# Amphibians as example since its small and we know it works
+tic(); (db |>
+          filter(countrycode == "US") |> 
+          select(
+              kingdom
+            , class
+            , genus
+            , species
+            , year
+            # , basisofrecord    # to drop 'unknown'?
+            , collectioncode   # has GBBC, which is ebird, has EBIRD which is ebird
+            , institutioncode  # has iNaturalist
+            , decimallatitude, decimallongitude
+            ) |>
+          filter(year >= 2000 & year <= 2020) |> # recent, please
+          # king/classes of interest
+          filter(class == 'Amphibia') |> 
+          filter(!is.na(decimallatitude) & !is.na(decimallongitude)) |> # need coords
+          mutate(source = 
+                   case_when(
+                     str_detect(collectioncode, 'EBIRD')  ~  'ebird',
+                     str_detect(institutioncode, 'iNaturalist') ~ 'iNaturalist',
+                     TRUE ~ 'other')
+                 ) |> 
+          count(  #class # TODO I'm not confident a nice kingdom/class look up to genus/species will be available.. keep here?
+              genus
+            , species
+            , year
+            # , basisofrecord
+            # , collectioncode
+            # , institutioncode
+            , source
+            , decimallatitude, decimallongitude
+            , name = 'n_obs'
+                ) |> 
+          collect() |> 
+          fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/download_amphibia_TEST_direct_write_out_'
+                        , Sys.Date(), '.fst'))
+
+        ); toc(); beep() # ~6 mins
+
+```
+
 
 ## End

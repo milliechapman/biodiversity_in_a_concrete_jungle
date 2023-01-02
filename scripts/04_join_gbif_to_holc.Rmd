@@ -1,5 +1,5 @@
 ---
-title: "03_filter_gbif_by_MSAs"
+title: "04_join_gbif_to_holc"
 author: "Dexter H. Locke, PhD"
 date: "`r format(Sys.time())`"
 output: html_document
@@ -144,7 +144,7 @@ holc_pal_f<- c('#92BC6B' # green
 # fixes mapview
 mapviewOptions(fgb = FALSE)
 
-# sf::sf_use_s2(FALSE) # supresses error in some sf opperations, probably not needed?
+sf::sf_use_s2(FALSE) # supresses error in some sf opperations
 
 ```
 
@@ -200,274 +200,208 @@ holc |>
 
 
 ## C GBIF
-### i fungi - as test case
+### i fungi
 ```{r eval=FALSE, include=FALSE}
 
-(fungi <- read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_fungi_2023-01-01.fst') |> mutate(taxon = 'Fungi', .before = 1))
+(sf_fungi <- 
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_MSA_2023-01-01.fst') |> 
+   st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
+   )
 
-# spatilize, possible combine with previous step?
-sf_fungi <- 
-  fungi |> 
-  # sample_n(10000) |>
-  # sample_n(1e5) |>
-  st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
 
-# map! FIXME: ECUADOR?!!? POINTS IN WATE?
-sf_fungi |> 
-  # sample_n(10000) |>
-  mapview(zcol = 'year') 
-
-# # spatially join GBIF to MSAs
-# # serial - works fine for small number of points or small polygons (holc)
-# tic(); (gbif_fungi_MSA <- st_join(sf_fungi, msa_w_holc, join = st_within)); toc() # < 3s w 10k points 
-
+# # spatially join GBIF to HOLC
 # parallel
-tic(); (gbif_fungi_MSA <- st_par(  sf_fungi
-                                 , msa_w_holc
-                                 , n_cores = 10
-                                 , sf_func = st_join
-                                 , join = st_within)); toc() # ~1s w ~1M points and 10 cores
+tic(); (gbif_fungi_holc <- st_par(  sf_fungi
+                                  , holc |> tidylog::select(-state, -city)
+                                  , n_cores = 10
+                                  , sf_func = st_join
+                                  , join = st_within) |> 
+          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # ~8s w ~500k points and 10 cores
+
 # 2x checks
-gbif_fungi_MSA |> glimpse()
-gbif_fungi_MSA |> tabyl(msa_name)
+gbif_fungi_holc |> glimpse()
+gbif_fungi_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
-# map - CAREFUL, NOT WITH FULL DATA
-gbif_fungi_MSA |> 
-  filter(!is.na(msa_name)) |> # cut the obs NOT in the MSA's, drops down to ~574k
-  sample_frac(.01) |>         # for speed
-  mapview(zcol = 'msa_name') + 
-  mapview(msa_w_holc, alpha.regions = 0) + # clear polygon, black boarder
-  mapview(holc
-          , zcol =   'holc_grade'
-          , col.regions = holc_pal)
 
-# # write out. As a gpkg the file was 115 MB(!) as a csv with coordinates in columns it is 80.9 MB
-# gbif_fungi_MSA |> 
-#   tidylog::filter(!is.na(msa_name)) |> # cut the obs NOT in the MSA's, drops down to ~574k
-#   st_write(paste0(
-#     '../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_MSA_', Sys.Date(), '.csv')
-#     , layer_options = "GEOMETRY=AS_XY") # converts geometry to x and y cols
-#  # st_write(paste0(
-#  #   '../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fung_MSA_', Sys.Date(), '.gpkg'))
-
-# HALF the size as csv, ~37 Mb
-gbif_fungi_MSA %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
-  tidylog::filter(!is.na(msa_name)) %>%
+# write out
+gbif_fungi_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
   cbind(., st_coordinates(.)) %>%
   st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_MSA_', Sys.Date(), '.fst'))
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_holc_', Sys.Date(), '.fst'))
 
 # clean up
-rm(fungi, sf_fungi, gbif_fungi_MSA); gc()
+rm(sf_fungi, gbif_fungi_holc); gc()
 
 ```
 
 ### ii plants
 ```{r eval=FALSE, include=FALSE}
 
-(sf_plantae <- # 8.5 million records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_plantae_2023-01-01.fst') |>
-   mutate(taxon = 'Plantae', .before = 1) |> 
-   st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+(sf_plantae <- # 4.3 million records
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_MSA_2023-01-01.fst') |>
+   st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
  )
 
-# map! 
-sf_plantae |> 
-  sample_n(1e4) |>
-  mapview(zcol = 'year') 
 
-# # spatially join GBIF to MSAs
+# # spatially join GBIF to HOLC
 # parallel
-tic(); (gbif_plantae_MSA <- 
-          st_par(  sf_plantae
-                 , msa_w_holc
-                 , n_cores = 12
-                 , sf_func = st_join
-                 , join = st_within)); toc() # ~166s w 8.5M points and 12 cores
+tic(); (gbif_plantae_holc <- st_par(  sf_plantae
+                                    , holc |> tidylog::select(-state, -city)
+                                    , n_cores = 10
+                                    , sf_func = st_join
+                                    , join = st_within) |> 
+          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # ~75s w ~4M points and 10 cores
 
 # 2x checks
-gbif_plantae_MSA |> glimpse()
-gbif_plantae_MSA |> tabyl(msa_name)
+gbif_plantae_holc |> glimpse()
+gbif_plantae_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
-  
-# # write out. ~620Mb
-# gbif_plantae_MSA |> 
-#   tidylog::filter(!is.na(msa_name)) |> # cut the obs NOT in the MSA's, drops ~half
-#   st_write(paste0(
-#     '../biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_MSA_', Sys.Date(), '.csv')
-#     , layer_options = "GEOMETRY=AS_XY") # converts geometry to x and y cols
-#  # st_write(paste0(
-#  #   '../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fung_MSA_', Sys.Date(), '.gpkg'))
 
-# using fst it is half! 311Mb
-gbif_plantae_MSA %>%
-  tidylog::filter(!is.na(msa_name)) %>%
+# write out
+gbif_plantae_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
   cbind(., st_coordinates(.)) %>%
   st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_MSA_'
-                        , Sys.Date(), '.fst'))
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_holc_', Sys.Date(), '.fst'))
 
-rm(sf_plantae, gbif_plantae_MSA)
+# clean up
+rm(sf_plantae, gbif_plantae_holc); gc()
+
 ```
 
 ### iii aves..
 
-
 ### iv insecta
 ```{r eval=FALSE, include=FALSE}
 
-(sf_insecta <- # ~4.1 million records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_insecta_2023-01-01.fst') |>
-   mutate(taxon = 'Insecta', .before = 1) |> 
-   st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+(sf_insecta <- # ~1.8 million records
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_insecta_MSA_2023-01-01.fst') |>
+   st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
  )
 
-# map! 
-sf_insecta |> 
-  sample_n(1e4) |>
-  mapview(zcol = 'year') 
-
-# # spatially join GBIF to MSAs
+# # spatially join GBIF to HOLC
 # parallel
-tic(); (gbif_insecta_MSA <- 
+tic(); (gbif_insecta_holc <- 
           st_par(  sf_insecta
-                 , msa_w_holc
-                 , n_cores = 12
+                 , holc |> tidylog::select(-state, -city)
+                 , n_cores = 10
                  , sf_func = st_join
-                 , join = st_within)); toc() # ~86s w 4.1M points and 12 cores
+                 , join = st_within) |> 
+          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # ~22s w ~1.8M points and 10 cores
 
 # 2x checks
-gbif_insecta_MSA |> glimpse()
-gbif_insecta_MSA |> tabyl(msa_name)
+gbif_insecta_holc |> glimpse()
+gbif_insecta_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
-  
-# write out using fst ~150Mb
-gbif_insecta_MSA %>%
-  tidylog::filter(!is.na(msa_name)) %>% # ~1.85M remaining
+
+# write out
+gbif_insecta_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
   cbind(., st_coordinates(.)) %>%
   st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_insecta_MSA_'
-                        , Sys.Date(), '.fst'))
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_insecta_holc_', Sys.Date(), '.fst'))
 
-rm(sf_insecta, gbif_insecta_MSA)
+# clean up
+rm(sf_insecta, gbif_insecta_holc); gc()
+
 ```
 
 ### v mammalia
 ```{r eval=FALSE, include=FALSE}
 
-(sf_mammalia <- # ~1 million records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_mammalia_2023-01-01.fst') |>
-   mutate(taxon = 'Mammalia', .before = 1) |> 
-   st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+(sf_mammalia <- # ~225k records
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_mammalia_MSA_2023-01-01.fst') |>
+   st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
  )
 
-# map! 
-sf_mammalia |> 
-  sample_n(1e4) |>
-  mapview(zcol = 'year') 
-
-# # spatially join GBIF to MSAs
+# # spatially join GBIF to HOLC
 # parallel
-tic(); (gbif_mammalia_MSA <- 
+tic(); (gbif_mammalia_holc <- 
           st_par(  sf_mammalia
-                 , msa_w_holc
-                 , n_cores = 12
+                 , holc |> tidylog::select(-state, -city)
+                 , n_cores = 10
                  , sf_func = st_join
-                 , join = st_within)); toc() # ~10s w ~1M points and 12 cores
+                 , join = st_within) |> 
+          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # <3s w ~225k points and 10 cores
 
 # 2x checks
-gbif_mammalia_MSA |> glimpse()
-gbif_mammalia_MSA |> tabyl(msa_name)
+gbif_mammalia_holc |> glimpse()
+gbif_mammalia_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
-  
-# write out using fst ~16Mb
-gbif_mammalia_MSA %>%
-  tidylog::filter(!is.na(msa_name)) %>% # ~225k remaining
+
+# write out
+gbif_mammalia_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
   cbind(., st_coordinates(.)) %>%
   st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_mammalia_MSA_'
-                        , Sys.Date(), '.fst'))
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_mammalia_holc_', Sys.Date(), '.fst'))
 
-rm(sf_mammalia, gbif_mammalia_MSA)
+# clean up
+rm(sf_mammalia, gbif_mammalia_holc); gc()
 ```
 
 ### vi reptilia (aka Squamata!)
 ```{r}
 
-(sf_reptilia <- # 400k records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_reptilia_2023-01-02.fst') |>
-   mutate(taxon = 'Amphibia', .before = 1) |> 
-   st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+(sf_reptilia <- # 190k records
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_reptilia_MSA_2023-01-02.fst') |>
+   st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
  )
 
-# map! 
-sf_reptilia |> 
-  sample_n(1e4) |>
-  mapview(zcol = 'year') 
-
-# # spatially join GBIF to MSAs
+# # spatially join GBIF to HOLC
 # parallel
-tic(); (gbif_reptilia_MSA <- 
+tic(); (gbif_reptilia_holc <- 
           st_par(  sf_reptilia
-                 , msa_w_holc
-                 , n_cores = 12
+                 , holc |> tidylog::select(-state, -city)
+                 , n_cores = 10
                  , sf_func = st_join
-                 , join = st_within)); toc() # ~8s w ~400k points and 12 cores
+                 , join = st_within) |> 
+          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # ~5s w ~190k points and 10 cores
 
 # 2x checks
-gbif_reptilia_MSA |> glimpse()
-gbif_reptilia_MSA |> tabyl(msa_name)
+gbif_reptilia_holc |> glimpse()
+gbif_reptilia_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
 
-# write out using fst ~20Mb
-gbif_reptilia_MSA %>%
-  tidylog::filter(!is.na(msa_name)) %>% # ~190k remaining
+# write out
+gbif_reptilia_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
   cbind(., st_coordinates(.)) %>%
   st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_reptilia_MSA_'
-                        , Sys.Date(), '.fst'))
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_reptilia_holc_', Sys.Date(), '.fst'))
 
-rm(sf_reptilia, gbif_reptilia_MSA)
-
+# clean up
+rm(sf_reptilia, gbif_reptilia_holc); gc()
 ```
 
-### vii amphibia
-```{r eval=FALSE, include=FALSE}
 
-(sf_amphibia <- # 300k records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_amphibia_2023-01-01.fst') |>
-   mutate(taxon = 'Amphibia', .before = 1) |> 
-   st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+### vii amphibia
+```{r}
+
+(sf_amphibia <- # 130k records
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_amphibia_MSA_2023-01-01.fst') |>
+   st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
  )
 
-# map! 
-sf_amphibia |> 
-  sample_n(1e4) |>
-  mapview(zcol = 'year') 
-
-# # spatially join GBIF to MSAs
+# # spatially join GBIF to HOLC
 # parallel
-tic(); (gbif_amphibia_MSA <- 
+tic(); (gbif_amphibia_holc <- 
           st_par(  sf_amphibia
-                 , msa_w_holc
-                 , n_cores = 12
+                 , holc |> tidylog::select(-state, -city)
+                 , n_cores = 10
                  , sf_func = st_join
-                 , join = st_within)); toc() # ~4s w ~300k points and 12 cores
+                 , join = st_within) |> 
+          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # <1.5s w ~130k points and 10 cores
 
 # 2x checks
-gbif_amphibia_MSA |> glimpse()
-gbif_amphibia_MSA |> tabyl(msa_name)
+gbif_amphibia_holc |> glimpse()
+gbif_amphibia_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
 
-# write out using fst ~10Mb
-gbif_amphibia_MSA %>%
-  tidylog::filter(!is.na(msa_name)) %>% # ~131k remaining
+# write out
+gbif_amphibia_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
   cbind(., st_coordinates(.)) %>%
   st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_amphibia_MSA_'
-                        , Sys.Date(), '.fst'))
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_amphibia_holc_', Sys.Date(), '.fst'))
 
-rm(sf_amphibia, gbif_amphibia_MSA)
+# clean up
+rm(sf_amphibia, gbif_amphibia_holc); gc()
 ```
 
 
