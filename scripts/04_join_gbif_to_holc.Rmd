@@ -150,8 +150,8 @@ sf::sf_use_s2(FALSE) # supresses error in some sf opperations
 
 
 # 1 read in spatial data
-## A MSAs
-```{r}
+## A MSAs - needed?
+```{r eval=FALSE, include=FALSE}
 msa_w_holc <- 
   st_read(paste0(getwd()
                  , '/working_data/MSA/msa_as_geopackage_2022-12-08 15-40-07.gpkg'))
@@ -268,7 +268,55 @@ rm(sf_plantae, gbif_plantae_holc); gc()
 
 ```
 
-### iii aves..
+### iii aves by year
+```{r eval=FALSE, include=FALSE}
+
+(aves_files <- 
+    list.files('../biodiversity_in_a_concrete_jungle_data_too_big'
+               , pattern = 'gbif_aves_MSA' # MORE SPECIFIC THAN in script 03, because it HAS TO BE
+               , full.names = TRUE))
+
+
+for(i in 1:length(aves_files)){
+  
+  # track progress
+  print(i); print(aves_files[i])
+  
+  # extract year, used for naming files when saving out later
+  (year <- aves_files[i] |> 
+      str_remove('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_aves_MSA_') |> 
+      str_sub(1, 4))
+  
+  # read in the annual bird data
+  sf_aves <-
+    read_fst(aves_files[i]) |>
+    st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
+
+  # spatially join GBIF to MSAs
+  tic()
+  gbif_aves_holc <-
+    st_par(  sf_aves
+             , holc |> tidylog::select(-state, -city)
+             , n_cores = 10
+             , sf_func = st_join
+             , join = st_within) |>
+    mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))
+  toc(); beep()
+
+  # write out using fst - could skip `gbif_aves_MSA <- ` and save directly?
+  gbif_aves_holc %>%
+    cbind(., st_coordinates(.)) %>%
+    st_set_geometry(NULL) |>
+    fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_aves_holc_'
+                          , year
+                          , '_'
+                          , Sys.Date(), '.fst'))
+
+  rm(sf_aves, gbif_aves_holc)
+}
+
+
+```
 
 ### iv insecta
 ```{r eval=FALSE, include=FALSE}

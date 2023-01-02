@@ -310,7 +310,56 @@ gbif_plantae_MSA %>%
 rm(sf_plantae, gbif_plantae_MSA)
 ```
 
-### iii aves..
+### iii aves by year
+```{r eval=FALSE, include=FALSE}
+
+# this only works the first time. After we write out, there are more files with "aves" in the name... CAREFUL!!
+(aves_files <- 
+  list.files('../biodiversity_in_a_concrete_jungle_data_too_big'
+             , pattern = 'aves'
+             , full.names = TRUE))
+
+
+for(i in 1:length(aves_files)){
+  
+  # track progress
+  print(i); print(aves_files[i])
+  
+  # extract year, used for naming files when saving out later
+  (year <- aves_files[i] |> 
+    str_remove('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_') |> 
+    str_sub(1, 4))
+  
+  # read in the annual bird data
+  sf_aves <-
+    read_fst(aves_files[i]) |>
+    mutate(taxon = 'Aves', .before = 1) |>
+    st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+  
+  # spatially join GBIF to MSAs
+  tic()
+  gbif_aves_MSA <- 
+    st_par(  sf_aves
+           , msa_w_holc
+           , n_cores = 12
+           , sf_func = st_join
+           , join = st_within)
+  toc(); beep()
+  
+  # write out using fst
+  gbif_aves_MSA %>%
+  tidylog::filter(!is.na(msa_name)) %>%
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_aves_MSA_'
+                        , year
+                        , '_'
+                        , Sys.Date(), '.fst'))
+  
+  rm(sf_aves, gbif_aves_MSA)
+  }
+
+```
 
 
 ### iv insecta
