@@ -7,7 +7,7 @@ editor_options:
   chunk_output_type: console
 ---
 
-based off of Millie's "holc-all-spp.R" but designed for laptop
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)

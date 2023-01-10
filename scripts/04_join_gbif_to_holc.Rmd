@@ -7,7 +7,7 @@ editor_options:
   chunk_output_type: console
 ---
 
-based off of Millie's "holc-all-spp.R" but designed for laptop
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -182,7 +182,10 @@ msa_w_holc |> mapview()
 #   select(id, global_id, state, city, holc_id, holc_grade, city_state, area_holc_km2));toc() # < 5 seconds
 
 # *** OR ***
-(holc <- st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg'))
+holc <- st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg')
+
+
+
 
 
 # map holc polygons and MSA
@@ -417,7 +420,6 @@ gbif_reptilia_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/i
 # clean up
 rm(sf_reptilia, gbif_reptilia_holc); gc()
 ```
-
 
 ### vii amphibia
 ```{r}

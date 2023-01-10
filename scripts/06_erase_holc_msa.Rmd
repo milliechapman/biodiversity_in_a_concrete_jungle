@@ -1,0 +1,250 @@
+---
+title: "06_erase_holc_msa"
+author: "Dexter H. Locke, PhD"
+date: "`r format(Sys.time())`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# 0 set up: load libraries, custom functions, set defaults
+```{r}
+
+# load libraries
+# packages we'll be using
+packs <- c(
+    'tidyverse'  # a must have
+  , 'tidylog'    # prints out what was done in dplyr and tidr
+  # , 'gbifdb' # GBIF
+  , 'fst' # a faster table, makes outputs files much smaller, too.
+  # , 'terra'
+  # , 'KnowBR'    # creates biodiversity estimates like completeness.
+  , 'sf'        # spatial support
+  , 'mapview'   # webmaps
+  , 'janitor'   # cleans things up, also pipe-friendly cross-tabulations
+  , 'tictoc'    # times things
+  , 'beepr'     # makes noises
+)
+
+
+# check for all of the libraries, install if you don't have them
+if (length(setdiff(packs, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packs, rownames(installed.packages())))  
+}
+
+# load them
+vapply(packs, library, character.only = TRUE, logical(1), logical.return = TRUE, quietly = TRUE)
+
+
+
+# set custom function for getting spatial data
+see_sf <- function(){
+# what's in memory that are sf - spatial features?
+keep(eapply(.GlobalEnv, class),      # gets the objects in the global environment
+     ~ any(str_detect(., "sf"))) %>% # selects elements with sf in them
+    names(.) %>% as.character(.)     # my simple features
+}
+
+see_sf() -> sf_in_memory
+
+# what are the spatial references of those SF classes?
+mget(sf_in_memory) %>% purrr::map(~st_crs(.x)$epsg) %>% unlist() #%>% View()
+
+
+# # get file size
+# for(obj in ls()){message(obj); print(object.size(get(obj)), units='auto'); cat('\n')}; rm(obj)
+
+# thanks Phil Donovan @philip_donovan
+# https://www.spatialanalytics.co.nz/post/2018/04/01/fixing-st-par/
+# Paralise any simple features analysis.
+st_parallel <- function(sf_df, sf_func, n_cores, ...){
+
+  # Create a vector to split the data set up by.
+  split_vector <- rep(1:n_cores, each = nrow(sf_df) / n_cores, length.out = nrow(sf_df))
+
+  # Perform GIS analysis
+  split_results <- split(sf_df, split_vector) %>%
+    parallel::mclapply(function(x) sf_func(x, ...), mc.cores = n_cores)
+
+
+  # Define the output_class. If length is greater than two, then grab the second variable.
+  output_class <- class(split_results[[1]])
+  if (length(output_class) == 2){
+    output_class <- output_class[2]
+  }
+
+  # Combine results back together. Method of combining depends on the output from the function.
+  if (output_class == "matrix"){
+    result <- do.call("rbind", split_results)
+    names(result) <- NULL
+  } else if (output_class == "sfc") {
+    result <- do.call("c", split_results)
+    result <- sf_func(result) # do.call combines the list but there are still n_cores of the geometry which had been split up. Running st_union or st_collect gathers them up into one, as is the expected output of these two functions.
+  } else if (output_class %in% c('list', 'sgbp') ){
+    result <- do.call("c", split_results)
+    names(result) <- NULL
+  } else if (output_class == "data.frame" ){
+    result <- do.call("rbind", split_results)
+  } else {
+    stop("Unknown class. st_parallel only accepts the following outputs at present: sfc, list, sf, matrix, sgbp.")
+  }
+
+  # Return result
+  return(result)
+}
+
+
+# Paralise any simple features analysis.
+# https://www.spatialanalytics.co.nz/post/2017/09/11/a-parallel-function-for-spatial-analysis-in-r/
+# define
+st_par <- function(sf_df, sf_func, n_cores, ...){
+  # Create a vector to split the data set up by.
+  split_vector <- rep(1:n_cores, each = nrow(sf_df) / n_cores, length.out = nrow(sf_df))
+  
+  # Perform GIS analysis
+  split_results <- split(sf_df, split_vector) %>%
+    parallel::mclapply(function(x) sf_func(x, ...), mc.cores = n_cores)
+  
+  # Combine results back together. Method of combining depends on the output from the function.
+  if (class(split_results[[1]]) == 'list' ){
+    result <- do.call("c", split_results)
+    names(result) <- NULL
+    } else {
+      result <- do.call("rbind", split_results)
+      }
+  # Return result
+  return(result)
+  }
+
+
+
+# make donut function
+st_erase <- function(x, y) st_difference(x, st_union(st_combine(y)))
+
+
+# erase that handles geometries more smoothly ()
+# via @tiennebr https://github.com/r-spatial/sf/issues/1280
+st_erase_2 = function(x, y) {
+    st_difference(
+        st_geometry(x) %>% st_buffer(0), 
+        st_union(st_combine(st_geometry(y))) %>% st_buffer(0)
+    )
+}
+
+
+st_erase_3 = function(x, y) {
+    st_difference(
+        x %>% st_buffer(0), 
+        st_union(st_combine(st_geometry(y))) %>% st_buffer(0))
+}
+
+
+# custom function for "Not In"
+`%nin%` <- Negate(`%in%`)
+
+
+# redlining colors
+holc_pal <- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              #, '#A9A9A9'
+              ) # dark gray)
+
+holc_pal_f<- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              , '#A9A9A9'
+              , '#000000')
+
+# fixes mapview
+mapviewOptions(fgb = FALSE)
+
+sf::sf_use_s2(FALSE) # supresses error in some sf operations
+
+
+# data(adworld) # needed for KnowBPolygon
+```
+
+
+# 1 read in spatial data
+## B MSAs
+```{r}
+msa_w_holc <- 
+  st_read(paste0(getwd()
+                 , '/working_data/MSA/msa_as_geopackage_2022-12-08 15-40-07.gpkg'))
+
+msa_w_holc |> mapview()  
+
+```
+
+
+
+## B holc polygons - is this even needed for right now?
+```{r}
+
+# sf::sf_use_s2(FALSE) # supresses error about invalid loops in 1212, 2851
+# # https://stackoverflow.com/questions/68478179/how-to-resolve-spherical-geometry-failures-when-joining-spatial-data
+# 
+# tic(); (holc <- 
+#           st_read("https://dsl.richmond.edu/panorama/redlining/static/fullDownload.geojson") |> 
+#           # st_read('input_data/HOLC_shapefile/holc_ad_data.shp', as_tibble = TRUE) |> 
+#           filter(!is.na(holc_grade) & holc_grade != 'E') %>%
+#           st_cast('POLYGON') %>% # IMPORTANT
+#           filter(!st_is_empty(.)) %>% 
+#           st_make_valid(.) %>% 
+#           rowid_to_column() %>% 
+#           rowid_to_column(var = 'global_id') %>% 
+#           # rowid_to_column(var = 'internal_id') %>% # TODO get this squeeky clean
+#           mutate(  id = paste(state, city, holc_id, holc_grade, rowid, sep = '_')
+#                  , city_state = paste0(city, ', ', state)
+#                  , area_holc_km2 = as.double(st_area(.) / 1e+6)) %>% 
+#   select(id, global_id, state, city, holc_id, holc_grade, city_state, area_holc_km2));toc() # < 5 seconds
+
+# *** OR ***
+
+# NOTICE !!! as_Spatial was failing because 'FL_Jacksonville_B3_B_1404' is a linstring, not a polygon
+# F FL but go 'Gators!
+(holc <- st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg', as_tibble = TRUE) |> 
+  filter(st_is(geom, 'POLYGON')))
+
+
+
+# map holc polygons and MSA
+holc |> 
+  # too many polygons at once.. filter by a state
+  # filter(state == 'CA') |> 
+  filter(state == 'NY') |>
+  # filter(state == 'MA') |> 
+  mapview(zcol =   'holc_grade'
+                , col.regions = holc_pal) +
+  mapview(msa_w_holc, alpha.regions = 0) #+ # clear polygon, black boarder
+  # mapview(ua)
+```
+
+
+# 2 erase holc from msa
+```{r}
+
+msa_ungraded <- st_erase_3(msa_w_holc, holc)
+
+# 2x check
+msa_ungraded
+msa_ungraded |> mapview()
+
+# save out
+tic(); msa_ungraded |> st_write('working_data/MSA_donut/msa_ungraded.gpkg'); toc(); beepr::beep()
+
+```
+
+## End
+
+# sand box

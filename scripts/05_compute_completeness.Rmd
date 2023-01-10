@@ -1,0 +1,800 @@
+---
+title: "05_compute_completeness"
+author: "Dexter H. Locke, PhD"
+date: "`r format(Sys.time())`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# 0 set up: load libraries, custom functions, set defaults
+```{r}
+
+# load libraries
+# packages we'll be using
+packs <- c(
+    'tidyverse'  # a must have
+  , 'tidylog'    # prints out what was done in dplyr and tidr
+  # , 'gbifdb' # GBIF
+  , 'fst' # a faster table, makes outputs files much smaller, too.
+  # , 'terra'
+  , 'KnowBR'    # creates biodiversity estimates like completeness.
+  , 'sf'        # spatial support
+  , 'mapview'   # webmaps
+  , 'janitor'   # cleans things up, also pipe-friendly cross-tabulations
+  , 'tictoc'    # times things
+  , 'beepr'     # makes noises
+)
+
+
+# check for all of the libraries, install if you don't have them
+if (length(setdiff(packs, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packs, rownames(installed.packages())))  
+}
+
+# load them
+vapply(packs, library, character.only = TRUE, logical(1), logical.return = TRUE, quietly = TRUE)
+
+
+
+# set custom function for getting spatial data
+see_sf <- function(){
+# what's in memory that are sf - spatial features?
+keep(eapply(.GlobalEnv, class),      # gets the objects in the global environment
+     ~ any(str_detect(., "sf"))) %>% # selects elements with sf in them
+    names(.) %>% as.character(.)     # my simple features
+}
+
+see_sf() -> sf_in_memory
+
+# what are the spatial references of those SF classes?
+mget(sf_in_memory) %>% purrr::map(~st_crs(.x)$epsg) %>% unlist() #%>% View()
+
+
+# # get file size
+# for(obj in ls()){message(obj); print(object.size(get(obj)), units='auto'); cat('\n')}; rm(obj)
+
+# thanks Phil Donovan @philip_donovan
+# https://www.spatialanalytics.co.nz/post/2018/04/01/fixing-st-par/
+# Paralise any simple features analysis.
+st_parallel <- function(sf_df, sf_func, n_cores, ...){
+
+  # Create a vector to split the data set up by.
+  split_vector <- rep(1:n_cores, each = nrow(sf_df) / n_cores, length.out = nrow(sf_df))
+
+  # Perform GIS analysis
+  split_results <- split(sf_df, split_vector) %>%
+    parallel::mclapply(function(x) sf_func(x, ...), mc.cores = n_cores)
+
+
+  # Define the output_class. If length is greater than two, then grab the second variable.
+  output_class <- class(split_results[[1]])
+  if (length(output_class) == 2){
+    output_class <- output_class[2]
+  }
+
+  # Combine results back together. Method of combining depends on the output from the function.
+  if (output_class == "matrix"){
+    result <- do.call("rbind", split_results)
+    names(result) <- NULL
+  } else if (output_class == "sfc") {
+    result <- do.call("c", split_results)
+    result <- sf_func(result) # do.call combines the list but there are still n_cores of the geometry which had been split up. Running st_union or st_collect gathers them up into one, as is the expected output of these two functions.
+  } else if (output_class %in% c('list', 'sgbp') ){
+    result <- do.call("c", split_results)
+    names(result) <- NULL
+  } else if (output_class == "data.frame" ){
+    result <- do.call("rbind", split_results)
+  } else {
+    stop("Unknown class. st_parallel only accepts the following outputs at present: sfc, list, sf, matrix, sgbp.")
+  }
+
+  # Return result
+  return(result)
+}
+
+
+# Paralise any simple features analysis.
+# https://www.spatialanalytics.co.nz/post/2017/09/11/a-parallel-function-for-spatial-analysis-in-r/
+# define
+st_par <- function(sf_df, sf_func, n_cores, ...){
+  # Create a vector to split the data set up by.
+  split_vector <- rep(1:n_cores, each = nrow(sf_df) / n_cores, length.out = nrow(sf_df))
+  
+  # Perform GIS analysis
+  split_results <- split(sf_df, split_vector) %>%
+    parallel::mclapply(function(x) sf_func(x, ...), mc.cores = n_cores)
+  
+  # Combine results back together. Method of combining depends on the output from the function.
+  if (class(split_results[[1]]) == 'list' ){
+    result <- do.call("c", split_results)
+    names(result) <- NULL
+    } else {
+      result <- do.call("rbind", split_results)
+      }
+  # Return result
+  return(result)
+  }
+
+# custom function for "Not In"
+`%nin%` <- Negate(`%in%`)
+
+
+# redlining colors
+holc_pal <- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              #, '#A9A9A9'
+              ) # dark gray)
+
+holc_pal_f<- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              , '#A9A9A9'
+              , '#000000')
+
+# fixes mapview
+mapviewOptions(fgb = FALSE)
+
+sf::sf_use_s2(FALSE) # supresses error in some sf operations
+
+
+data(adworld) # needed for KnowBPolygon
+```
+
+
+# 1 read in spatial data
+## A holc polygons - is this even needed for right now?
+```{r}
+
+# sf::sf_use_s2(FALSE) # supresses error about invalid loops in 1212, 2851
+# # https://stackoverflow.com/questions/68478179/how-to-resolve-spherical-geometry-failures-when-joining-spatial-data
+# 
+# tic(); (holc <- 
+#           st_read("https://dsl.richmond.edu/panorama/redlining/static/fullDownload.geojson") |> 
+#           # st_read('input_data/HOLC_shapefile/holc_ad_data.shp', as_tibble = TRUE) |> 
+#           filter(!is.na(holc_grade) & holc_grade != 'E') %>%
+#           st_cast('POLYGON') %>% # IMPORTANT
+#           filter(!st_is_empty(.)) %>% 
+#           st_make_valid(.) %>% 
+#           rowid_to_column() %>% 
+#           rowid_to_column(var = 'global_id') %>% 
+#           # rowid_to_column(var = 'internal_id') %>% # TODO get this squeeky clean
+#           mutate(  id = paste(state, city, holc_id, holc_grade, rowid, sep = '_')
+#                  , city_state = paste0(city, ', ', state)
+#                  , area_holc_km2 = as.double(st_area(.) / 1e+6)) %>% 
+#   select(id, global_id, state, city, holc_id, holc_grade, city_state, area_holc_km2));toc() # < 5 seconds
+
+# *** OR ***
+
+# NOTICE !!! as_Spatial was failing because 'FL_Jacksonville_B3_B_1404' is a linstring, not a polygon
+# F FL but go 'Gators!
+(holc <- st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg') |> 
+  filter(st_is(geom, 'POLYGON')) |> 
+  as_Spatial())
+
+
+
+# map holc polygons and MSA
+holc |> 
+  # too many polygons at once.. filter by a state
+  # filter(state == 'CA') |> 
+  # filter(state == 'NY') |> 
+  # filter(state == 'MA') |> 
+  mapview(zcol =   'holc_grade'
+                , col.regions = holc_pal)
+  
+```
+
+
+
+
+TODO should we have dropped 'species' without genus and species before?
+
+## B KnowBPolygon prep and runs
+
+Make data ready for KnowBPolygon via grouping and selecting
+
+### i fungi - test: work out the workflow on this subset of the data
+```{r eval=FALSE, include=FALSE}
+
+(
+  fungi <- 
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_holc_2023-01-01.fst') |> 
+    tibble() |> 
+    select(genus, species, n_obs, X, Y, id, holc_grade) |> 
+    unite(genus_species, genus, species, sep = '_') |> 
+    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+    group_by(genus_species, X, Y, id, holc_grade) |> 
+    summarise(counts = sum(n_obs)) |> 
+    select(genus_species, lon = X, lat = Y, counts, holc_grade)
+)
+
+# why the "Adding missing grouping variables: `id`" message?
+
+# 2x checks
+fungi |> tail()
+fungi |> arrange(desc(counts))
+fungi |> tabyl(id) |> tibble()
+fungi |> tabyl(holc_grade)
+
+
+# work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), much smaller
+(
+  fungi_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_holc_2023-01-01.fst') |> 
+    tibble() |> 
+    filter(holc_grade != 'Not Graded') |> 
+    select(genus, species, n_obs, X, Y, id) |> 
+    unite(genus_species, genus, species, sep = '_') |> 
+    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+    group_by(genus_species, X, Y, id) |> 
+    summarise(counts = sum(n_obs)) |> 
+    ungroup() |> # FIXME why is needed at all?
+    select(genus_species, lon = X, lat = Y, counts, id) # cosmetic reorder
+)
+
+# 2x checks
+fungi_holc |> tail()
+fungi_holc |> arrange(desc(counts))
+fungi_holc |> tabyl(id) |> tibble()
+
+(random_id <- fungi_holc |> sample_n(1) |> pull(id))
+fungi_holc |> filter(id == random_id) # |> View()
+
+# map
+fungi_holc |> filter(id == random_id) |> st_as_sf(coords = c('lon', 'lat'), crs = st_crs(4326)) |> mapview() +
+  mapview(holc[holc$id == random_id, ])
+  # mapview(holc |> filter(id == random_id)) # old when sf
+
+random_id <- c('CA_San Francisco_D3_D_1055', 'CA_San Francisco_D13_D_1048')
+
+# dplyr::filter() + stringr::str_detect() by @mdsumner
+detect_filter <- function(.data, string, pattern, negate = FALSE){
+  tidylog::filter(.data, stringr::str_detect({{string}}, pattern, negate = negate))
+  }
+
+fungi_holc |> detect_filter(id, 'CA')
+
+# trial test out
+data(adworld)
+tic(); KnowBPolygon(  #data = fungi_holc |> filter(id %in% random_id) |> data.frame() # testing on a few polys
+                      data = fungi_holc |> detect_filter(id, 'CA') |> data.frame()    # testing on all of California
+                     , format = 'A'
+                     , estimator = 1
+                     # , shape = holc |> filter(id %in% random_id) |> as_Spatial()     # sample polys
+                     # , shape = holc |> detect_filter(id, 'CA') |> as_Spatial()   # testing on all of California
+                     , shape = holc
+                     , shapenames = 'id'
+                     , save = 'CSV'
+                     , dec = '.'
+                     , jpg = FALSE
+                     , Maps = FALSE
+                     # , jpg = TRUE
+                     # , Maps = TRUE
+                     # , legend = TRUE
+                     # , colscale = c( "#C8FFFFFF"
+                     #                ,"#64FFFFFF"
+                     #                ,"#00FFFFFF"
+                     #                ,"#64FF64FF"
+                     #                ,"#C8FF00FF"
+                     #                ,"#FFFF00FF"
+                     #                ,"#FFC800FF"
+                     #                ,"#FF6400FF"
+                     #                ,"#FF0000FF")
+                     ); toc() # ~10 seconds for California, 8 without maps and figs, 12 seconds when fed ALL of holc polygons
+
+
+```
+
+### i fungi run - like above, but refined and for real
+```{r eval=FALSE, include=FALSE}
+
+# (
+#   fungi <- 
+#     read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_holc_2023-01-01.fst') |> 
+#     tibble() |> 
+#     select(genus, species, n_obs, X, Y, id, holc_grade) |> 
+#     unite(genus_species, genus, species, sep = '_') |> 
+#     filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+#     group_by(genus_species, X, Y, id, holc_grade) |> 
+#     summarise(counts = sum(n_obs)) |> 
+#     select(genus_species, lon = X, lat = Y, counts, holc_grade)
+# )
+# 
+# # why the "Adding missing grouping variables: `id`" message? becuase of NAs in id?
+# 
+# # 2x checks
+# fungi |> tail()
+# fungi |> arrange(desc(counts))
+# fungi |> tabyl(id) |> tibble()
+# fungi |> tabyl(holc_grade)
+
+
+# work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), *much* smaller
+(
+  fungi_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_holc_2023-01-01.fst') |> 
+    # tibble() |> 
+    filter(holc_grade != 'Not Graded') |> 
+    select(genus, species, n_obs, X, Y, id) |> 
+    unite(genus_species, genus, species, sep = '_') |> 
+    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+    group_by(genus_species, X, Y, id) |> 
+    summarise(counts = sum(n_obs)) |> 
+    ungroup() |> # FIXME why is needed at all?
+    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                           # KnowBPolygon doesn't like tibble
+)
+
+# 2x checks
+fungi_holc |> tail()
+fungi_holc |> arrange(desc(counts))
+fungi_holc |> tabyl(id) |> tibble()
+
+
+setwd(paste0(getwd(), '/working_data/completeness/fungi_graded_only')) # FUNGUS
+getwd()
+
+
+tic(); KnowBPolygon(  data = fungi_holc 
+                    , format = 'A'
+                    , shape = holc
+                    , shapenames = 'id'
+                    , save = 'CSV'
+                    , dec = '.'
+                    , jpg = FALSE
+                    , Maps = FALSE
+                    # , jpg = TRUE
+                    # , Maps = TRUE
+                    # , legend = TRUE
+                    # , colscale = c( "#C8FFFFFF"
+                    #                ,"#64FFFFFF"
+                    #                ,"#00FFFFFF"
+                    #                ,"#64FF64FF"
+                    #                ,"#C8FF00FF"
+                    #                ,"#FFFF00FF"
+                    #                ,"#FFC800FF"
+                    #                ,"#FF6400FF"
+                    #                ,"#FF0000FF")
+                    ); toc() # 45 seconds for 13,804 points in 9839 polygons
+
+# clean up
+rm(fungi, fungi_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+```
+
+
+### ii plantae
+```{r eval=FALSE, include=FALSE}
+# work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), much smaller
+
+
+(
+  plantae_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_holc_2023-01-01.fst') |> 
+    # tibble() |> 
+    filter(holc_grade != 'Not Graded') |> 
+    select(genus, species, n_obs, X, Y, id) |> 
+    unite(genus_species, genus, species, sep = '_') |> 
+    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+    group_by(genus_species, X, Y, id) |> 
+    summarise(counts = sum(n_obs)) |> 
+    ungroup() |> # FIXME why is needed at all?
+    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                           # KnowBPolygon doesn't like tibble
+)
+
+# 2x checks
+plantae_holc |> dim()
+plantae_holc |> tail()
+plantae_holc |> arrange(desc(counts))
+plantae_holc |> tabyl(id) |> tibble()
+
+
+setwd(paste0(getwd(), '/working_data/completeness/plantae_graded_only')) # FUNGUS
+getwd()
+
+
+tic(); KnowBPolygon(  data = plantae_holc 
+                    , format = 'A'
+                    , shape = holc
+                    , shapenames = 'id'
+                    , save = 'CSV'
+                    , dec = '.'
+                    , jpg = FALSE
+                    , Maps = FALSE
+                    ); toc() # 45 min for 918,255 points in 9839 polygons
+
+
+# clean up
+rm(plantae, plantae_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+```
+
+
+### iii aves by year
+```{r eval=FALSE, include=FALSE}
+(aves_files <- 
+    list.files('../biodiversity_in_a_concrete_jungle_data_too_big'
+               , pattern = 'gbif_aves_holc' # MORE SPECIFIC THAN in script 03 and 04, bc it HAS TO BE
+               , full.names = TRUE))
+
+# # sloppy but works (all of the columns, growing a vector [ewwey])
+# # good to know though for when we want to look at non-graded areas!
+# tic(); for(i in 1:length(aves_files)){
+#   print(i)
+#   if(i == 1){ aves_holc <- read_fst(aves_files[i]) }
+#   else      { aves_holc <- rbind(aves_holc, read_fst(aves_files[i])) }
+#   }; toc(); beepr::beep() # ~2 mins
+# 
+# aves_holc |> dim() # 51,591,321 records!
+
+
+# sloppy but works (all of the columns, growing a vector [ewwey])
+tic(); for(i in 1:length(aves_files)){
+  print(i)
+  if(i == 1){
+    
+    aves_holc <- 
+    read_fst(aves_files[i]) |> 
+    filter(holc_grade != 'Not Graded') |> 
+    select(genus, species, n_obs, X, Y, id) |> 
+    unite(genus_species, genus, species, sep = '_') |> 
+    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+    group_by(genus_species, X, Y, id) |> 
+    summarise(counts = sum(n_obs)) |> 
+    ungroup() |> # FIXME why is needed at all?
+    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                           # KnowBPolygon doesn't like tibble (needed?)
+    
+    }
+  else{
+    
+    aves_holc <- 
+      rbind(aves_holc
+            , read_fst(aves_files[i]) |> 
+              filter(holc_grade != 'Not Graded') |> 
+              select(genus, species, n_obs, X, Y, id) |> 
+              unite(genus_species, genus, species, sep = '_') |> 
+              filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+              group_by(genus_species, X, Y, id) |> 
+              summarise(counts = sum(n_obs)) |> 
+              ungroup() |> # FIXME why is needed at all?
+              select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+              data.frame()                                           # KnowBPolygon doesn't like tibble
+      )
+    }
+  }; toc(); beepr::beep() # ~36 SECONDS
+
+
+# 2x checks
+aves_holc |> dim() # 2,002,190 records
+aves_holc |> tail()
+aves_holc |> arrange(desc(counts))
+aves_holc |> tabyl(id) |> tibble()
+
+
+setwd(paste0(getwd(), '/working_data/completeness/aves_graded_only')) # FUNGUS
+getwd()
+
+
+tic(); KnowBPolygon(  data = aves_holc 
+                    , format = 'A'
+                    , shape = holc
+                    , shapenames = 'id'
+                    , save = 'CSV'
+                    , dec = '.'
+                    , jpg = FALSE
+                    , Maps = FALSE
+                    ); toc() # 1:33 for 2,002,190 points in 9839 polygons
+
+
+# clean up
+rm(aves, aves_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+### iv insecta
+```{r eval=FALSE, include=FALSE}
+
+# work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), much smaller
+
+
+(
+  insecta_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_insecta_holc_2023-01-01.fst') |> 
+    # tibble() |> 
+    filter(holc_grade != 'Not Graded') |> 
+    select(genus, species, n_obs, X, Y, id) |> 
+    unite(genus_species, genus, species, sep = '_') |> 
+    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+    group_by(genus_species, X, Y, id) |> 
+    summarise(counts = sum(n_obs)) |> 
+    ungroup() |> # FIXME why is needed at all?
+    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                           # KnowBPolygon doesn't like tibble
+)
+
+# 2x checks
+insecta_holc |> dim()
+insecta_holc |> tail()
+insecta_holc |> arrange(desc(counts))
+insecta_holc |> tabyl(id) |> tibble()
+
+
+setwd(paste0(getwd(), '/working_data/completeness/insecta_graded_only')) # FUNGUS
+getwd()
+
+
+tic(); KnowBPolygon(  data = insecta_holc 
+                    , format = 'A'
+                    , shape = holc
+                    , shapenames = 'id'
+                    , save = 'CSV'
+                    , dec = '.'
+                    , jpg = FALSE
+                    , Maps = FALSE
+                    ); toc() # 7 min for 121,489 points in 9839 polygons
+
+
+# clean up
+rm(insecta, insecta_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+### v mammalia
+```{r eval=FALSE, include=FALSE}
+
+# work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), much smaller
+
+(
+  mammalia_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_mammalia_holc_2023-01-01.fst') |> 
+    # tibble() |> 
+    filter(holc_grade != 'Not Graded') |> 
+    select(genus, species, n_obs, X, Y, id) |> 
+    unite(genus_species, genus, species, sep = '_') |> 
+    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+    group_by(genus_species, X, Y, id) |> 
+    summarise(counts = sum(n_obs)) |> 
+    ungroup() |> # FIXME why is needed at all?
+    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                           # KnowBPolygon doesn't like tibble
+)
+
+# 2x checks
+mammalia_holc |> dim()
+mammalia_holc |> tail()
+mammalia_holc |> arrange(desc(counts))
+mammalia_holc |> tabyl(id) |> tibble()
+
+
+setwd(paste0(getwd(), '/working_data/completeness/mammalia_graded_only')) # FUNGUS
+getwd()
+
+
+tic(); KnowBPolygon(  data = mammalia_holc 
+                    , format = 'A'
+                    , shape = holc
+                    , shapenames = 'id'
+                    , save = 'CSV'
+                    , dec = '.'
+                    , jpg = FALSE
+                    , Maps = FALSE
+                    ); toc() # ~1 min for 16,104 points in 9839 polygons
+
+
+# clean up
+rm(mammalia, mammalia_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+### vi reptilia (aka Squamata!)
+```{r}
+
+
+# work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), much smaller
+
+(
+  reptilia_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_reptilia_holc_2023-01-02.fst') |> # dif date
+    # tibble() |> 
+    filter(holc_grade != 'Not Graded') |> 
+    select(genus, species, n_obs, X, Y, id) |> 
+    unite(genus_species, genus, species, sep = '_') |> 
+    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+    group_by(genus_species, X, Y, id) |> 
+    summarise(counts = sum(n_obs)) |> 
+    ungroup() |> # FIXME why is needed at all?
+    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                           # KnowBPolygon doesn't like tibble
+)
+
+# 2x checks
+reptilia_holc |> dim()
+reptilia_holc |> tail()
+reptilia_holc |> arrange(desc(counts))
+reptilia_holc |> tabyl(id) |> tibble()
+
+
+setwd(paste0(getwd(), '/working_data/completeness/reptilia_graded_only')) # FUNGUS
+getwd()
+
+
+tic(); KnowBPolygon(  data = reptilia_holc 
+                    , format = 'A'
+                    , shape = holc
+                    , shapenames = 'id'
+                    , save = 'CSV'
+                    , dec = '.'
+                    , jpg = FALSE
+                    , Maps = FALSE
+                    ); toc() # ~24 seconds for 8,100 points in 9839 polygons
+
+
+# clean up
+rm(reptilia, reptilia_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+### vii amphibia
+```{r}
+
+
+# work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), much smaller
+
+(
+  amphibia_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_amphibia_holc_2023-01-01.fst') |> # dif date
+    # tibble() |> 
+    filter(holc_grade != 'Not Graded') |> 
+    select(genus, species, n_obs, X, Y, id) |> 
+    unite(genus_species, genus, species, sep = '_') |> 
+    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+    group_by(genus_species, X, Y, id) |> 
+    summarise(counts = sum(n_obs)) |> 
+    ungroup() |> # FIXME why is needed at all?
+    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                           # KnowBPolygon doesn't like tibble
+)
+
+# 2x checks
+amphibia_holc |> dim()
+amphibia_holc |> tail()
+amphibia_holc |> arrange(desc(counts))
+amphibia_holc |> tabyl(id) |> tibble()
+
+
+setwd(paste0(getwd(), '/working_data/completeness/amphibia_graded_only')) # FUNGUS
+getwd()
+
+
+tic(); KnowBPolygon(  data = amphibia_holc 
+                    , format = 'A'
+                    , shape = holc
+                    , shapenames = 'id'
+                    , save = 'CSV'
+                    , dec = '.'
+                    , jpg = FALSE
+                    , Maps = FALSE
+                    ); toc() # ~16 seconds for 3,229 points in 9839 polygons
+
+
+# clean up
+rm(amphibia, amphibia_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+```
+
+
+# 2 what is the relationship between size and speed for KnowBPolygon
+```{r}
+
+speed_size <- 
+  tribble(
+    ~size, ~speed,   ~taxon,
+    13804,     42,    'fungi',
+   918255,   2700,  'plantae', # 45 mins
+  2002190,   7200,     'aves', # 1:30
+   121489,    420,  'insecta', # 7 mins
+    16104,     60, 'mammalia',
+     8100,     24, 'reptilia',
+     3229,     16, 'amphibia'  # (aka Squamata!)
+  ) |> 
+  mutate(duration = hms::as_hms(speed))
+
+speed_size |> 
+  ggplot(aes(size
+             # , speed
+             , duration
+             )) + 
+  geom_line() +
+  geom_point(aes(color = taxon), size = 8) +
+  # geom_step() + 
+  theme_bw(16) +
+  scale_x_continuous(labels = scales::comma) + 
+  NULL
+
+
+```
+
+## End
+
+# sand box
+
+## find fucked up HOLC polygon(s) that wont convert sf to sp
+```{r}
+
+# sp::addAttrToGeom(x = holc$geometry)
+
+holc |> as_Spatial() # I have no idea why this fails
+holc |> filter(st_is(geometry, 'POLYGON')) |> as_Spatial() # I have no idea why this fails
+
+# try to convert EACH polygon one at a time, to see where error arises.
+for(i in holc$id){
+  print(i)
+  holc |> filter(id == i) |> as_Spatial()
+}
+
+# no issues. soo what's the deal?
+
+# nest and map the as_Spatial function onto 
+temp <- 
+  holc |> 
+  group_by(global_id) |> 
+  nest() |> 
+  mutate(sp = purrr::map(data, sf::as_Spatial, .progress = TRUE))
+
+temp$sp[[1]]
+temp$sp[[1]]@data
+temp$sp[[1]] |> mapview()
+rbind(temp$sp[[1]], temp$sp[[2]]) |> mapview()
+
+
+for(i in temp$global_id){
+  print(i)
+  if(i==1){holc_sp <- temp$sp[[i]]} else {holc_sp <- rbind(holc_sp, temp$sp[[i]])}
+  } # broke at feature 1403
+
+# holc_sp
+# all.true(holc_sp |> st_as_sf(), holc)
+
+holc |> slice(1401 : 1407)
+holc |> filter(id == 'FL_Jacksonville_B3_B_1404') |> mapview()
+holc |> detect_filter(id, "FL") |> mapview()
+
+```

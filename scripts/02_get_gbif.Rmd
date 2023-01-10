@@ -109,7 +109,7 @@ mapviewOptions(fgb = FALSE)
 
 ```
 
-# 1 connectd to database
+# 1 connect to database
 ```{r}
 
 db <- gbif_remote()
@@ -377,6 +377,7 @@ download_fungi |> arrange(desc(n_obs))
 
 ```
 
+TODO rewrite as loop and push into nested folder to prevent clutter..
 ### year 2000
 ```{r}
 
