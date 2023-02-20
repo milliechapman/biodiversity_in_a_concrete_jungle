@@ -146,6 +146,11 @@ mapviewOptions(fgb = FALSE)
 
 # sf::sf_use_s2(FALSE) # supresses error in some sf opperations, probably not needed?
 
+# create directory gbif points per biodiversity group spatially filtered to MSAs
+ifelse( !dir.exists('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA')
+       , dir.create('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA'), FALSE)
+
+
 ```
 
 
@@ -190,7 +195,7 @@ holc |>
   # too many polygons at once.. filter by a state
   # filter(state == 'CA') |> 
   # filter(state == 'NY') |> 
-  # filter(state == 'MA') |> 
+  filter(state == 'MA') |>
   mapview(zcol =   'holc_grade'
                 , col.regions = holc_pal) +
   mapview(msa_w_holc, alpha.regions = 0) # clear polygon, black boarder
@@ -203,7 +208,8 @@ holc |>
 ### i fungi - as test case
 ```{r eval=FALSE, include=FALSE}
 
-(fungi <- read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_fungi_2023-01-01.fst') |> mutate(taxon = 'Fungi', .before = 1))
+(fungi <- read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_fungi_2023-01-22.fst') |> 
+   mutate(taxon = 'Fungi', .before = 1))
 
 # spatilize, possible combine with previous step?
 sf_fungi <- 
@@ -212,7 +218,7 @@ sf_fungi <-
   # sample_n(1e5) |>
   st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
 
-# map! FIXME: ECUADOR?!!? POINTS IN WATE?
+# map! FIXME: ECUADOR?!!? POINTS IN WATER? - doesn't really matter since we are 'clipping' down here
 sf_fungi |> 
   # sample_n(10000) |>
   mapview(zcol = 'year') 
@@ -250,12 +256,12 @@ gbif_fungi_MSA |>
 #  # st_write(paste0(
 #  #   '../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fung_MSA_', Sys.Date(), '.gpkg'))
 
-# HALF the size as csv, ~37 Mb
+# HALF the size as csv, ~41 Mb
 gbif_fungi_MSA %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
   tidylog::filter(!is.na(msa_name)) %>%
   cbind(., st_coordinates(.)) %>%
   st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_MSA_', Sys.Date(), '.fst'))
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_fungi_MSA_', Sys.Date(), '.fst'))
 
 # clean up
 rm(fungi, sf_fungi, gbif_fungi_MSA); gc()
@@ -266,7 +272,7 @@ rm(fungi, sf_fungi, gbif_fungi_MSA); gc()
 ```{r eval=FALSE, include=FALSE}
 
 (sf_plantae <- # 8.5 million records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_plantae_2023-01-01.fst') |>
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_plantae_2023-01-22.fst') |> 
    mutate(taxon = 'Plantae', .before = 1) |> 
    st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
  )
@@ -287,7 +293,18 @@ tic(); (gbif_plantae_MSA <-
 
 # 2x checks
 gbif_plantae_MSA |> glimpse()
-gbif_plantae_MSA |> tabyl(msa_name)
+gbif_plantae_MSA |> 
+  st_drop_geometry() |> 
+  tabyl(msa_name) |> 
+  tibble() |>
+  drop_na() |> 
+  mutate(percent = 100*percent) |> 
+  arrange(desc(percent)) |> 
+  rowid_to_column() |> 
+  mutate(group = santoku::chop_evenly(rowid, intervals = 6)) |>
+  ggplot(aes(percent, reorder(msa_name, percent))) +
+  geom_col() +
+  facet_wrap(~group, scales = 'free_y', ncol = 1)
 
   
 # # write out. ~620Mb
@@ -299,24 +316,31 @@ gbif_plantae_MSA |> tabyl(msa_name)
 #  # st_write(paste0(
 #  #   '../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fung_MSA_', Sys.Date(), '.gpkg'))
 
-# using fst it is half! 311Mb
-gbif_plantae_MSA %>%
-  tidylog::filter(!is.na(msa_name)) %>%
-  cbind(., st_coordinates(.)) %>%
-  st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_MSA_'
-                        , Sys.Date(), '.fst'))
-
-rm(sf_plantae, gbif_plantae_MSA)
+# # using fst it is half! 349Mb
+# gbif_plantae_MSA %>%
+#   tidylog::filter(!is.na(msa_name)) %>%
+#   cbind(., st_coordinates(.)) %>%
+#   st_set_geometry(NULL) |> 
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_plantae_MSA_'
+#                         , Sys.Date(), '.fst'))
+# 
+# rm(sf_plantae, gbif_plantae_MSA)
 ```
+
 
 ### iii aves by year
 ```{r eval=FALSE, include=FALSE}
 
-# this only works the first time. After we write out, there are more files with "aves" in the name... CAREFUL!!
+
+# create directory gbif points per biodiversity group spatially filtered to MSAs
+ifelse( !dir.exists('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/aves')
+       , dir.create('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/aves'), FALSE)
+
+
+# since aves are in seperate folder, no need for pattern matching, much safer than previous version
 (aves_files <- 
-  list.files('../biodiversity_in_a_concrete_jungle_data_too_big'
-             , pattern = 'aves'
+  list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/aves'
+             # , pattern = 'aves'
              , full.names = TRUE))
 
 
@@ -327,7 +351,7 @@ for(i in 1:length(aves_files)){
   
   # extract year, used for naming files when saving out later
   (year <- aves_files[i] |> 
-    str_remove('../biodiversity_in_a_concrete_jungle_data_too_big/download_aves_') |> 
+    str_remove('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/aves/download_aves_') |> 
     str_sub(1, 4))
   
   # read in the annual bird data
@@ -341,7 +365,7 @@ for(i in 1:length(aves_files)){
   gbif_aves_MSA <- 
     st_par(  sf_aves
            , msa_w_holc
-           , n_cores = 12
+           , n_cores = 10
            , sf_func = st_join
            , join = st_within)
   toc(); beep()
@@ -351,7 +375,7 @@ for(i in 1:length(aves_files)){
   tidylog::filter(!is.na(msa_name)) %>%
   cbind(., st_coordinates(.)) %>%
   st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_aves_MSA_'
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/aves/aves_MSA_'
                         , year
                         , '_'
                         , Sys.Date(), '.fst'))
@@ -365,8 +389,8 @@ for(i in 1:length(aves_files)){
 ### iv insecta
 ```{r eval=FALSE, include=FALSE}
 
-(sf_insecta <- # ~4.1 million records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_insecta_2023-01-01.fst') |>
+(sf_insecta <- # ~4.2 million records
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_insecta_2023-01-22.fst') |>
    mutate(taxon = 'Insecta', .before = 1) |> 
    st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
  )
@@ -383,29 +407,30 @@ tic(); (gbif_insecta_MSA <-
                  , msa_w_holc
                  , n_cores = 12
                  , sf_func = st_join
-                 , join = st_within)); toc() # ~86s w 4.1M points and 12 cores
+                 , join = st_within)); toc() # ~2mins w 4.2M points and 12 cores
 
 # 2x checks
 gbif_insecta_MSA |> glimpse()
-gbif_insecta_MSA |> tabyl(msa_name)
+gbif_insecta_MSA |> tabyl(msa_name) |> tibble() |> arrange(desc(n))
 
-  
-# write out using fst ~150Mb
-gbif_insecta_MSA %>%
-  tidylog::filter(!is.na(msa_name)) %>% # ~1.85M remaining
-  cbind(., st_coordinates(.)) %>%
-  st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_insecta_MSA_'
-                        , Sys.Date(), '.fst'))
 
-rm(sf_insecta, gbif_insecta_MSA)
+# # write out using fst ~167Mb
+# gbif_insecta_MSA %>%
+#   tidylog::filter(!is.na(msa_name)) %>% # ~1.85M remaining
+#   cbind(., st_coordinates(.)) %>%
+#   st_set_geometry(NULL) |> 
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_insecta_MSA_'
+#                         , Sys.Date(), '.fst'))
+# 
+# rm(sf_insecta, gbif_insecta_MSA)
+
 ```
 
 ### v mammalia
 ```{r eval=FALSE, include=FALSE}
 
 (sf_mammalia <- # ~1 million records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_mammalia_2023-01-01.fst') |>
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_mammalia_2023-01-22.fst') |>
    mutate(taxon = 'Mammalia', .before = 1) |> 
    st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
  )
@@ -422,29 +447,29 @@ tic(); (gbif_mammalia_MSA <-
                  , msa_w_holc
                  , n_cores = 12
                  , sf_func = st_join
-                 , join = st_within)); toc() # ~10s w ~1M points and 12 cores
+                 , join = st_within)); toc() # ~14s w ~1M points and 12 cores
 
 # 2x checks
 gbif_mammalia_MSA |> glimpse()
-gbif_mammalia_MSA |> tabyl(msa_name)
+gbif_mammalia_MSA |> tabyl(msa_name) |> tibble()
 
   
-# write out using fst ~16Mb
-gbif_mammalia_MSA %>%
-  tidylog::filter(!is.na(msa_name)) %>% # ~225k remaining
-  cbind(., st_coordinates(.)) %>%
-  st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_mammalia_MSA_'
-                        , Sys.Date(), '.fst'))
-
-rm(sf_mammalia, gbif_mammalia_MSA)
+# # write out using fst ~17Mb
+# gbif_mammalia_MSA %>%
+#   tidylog::filter(!is.na(msa_name)) %>% # ~225k remaining
+#   cbind(., st_coordinates(.)) %>%
+#   st_set_geometry(NULL) |> 
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_mammalia_MSA_'
+#                         , Sys.Date(), '.fst'))
+# 
+# rm(sf_mammalia, gbif_mammalia_MSA)
 ```
 
 ### vi reptilia (aka Squamata!)
 ```{r}
 
 (sf_reptilia <- # 400k records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_reptilia_2023-01-02.fst') |>
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_reptilia_2023-01-22.fst') |>
    mutate(taxon = 'Amphibia', .before = 1) |> 
    st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
  )
@@ -461,22 +486,22 @@ tic(); (gbif_reptilia_MSA <-
                  , msa_w_holc
                  , n_cores = 12
                  , sf_func = st_join
-                 , join = st_within)); toc() # ~8s w ~400k points and 12 cores
+                 , join = st_within)); toc() # ~6s w ~400k points and 12 cores
 
 # 2x checks
 gbif_reptilia_MSA |> glimpse()
-gbif_reptilia_MSA |> tabyl(msa_name)
+gbif_reptilia_MSA |> tabyl(msa_name) |> tibble() |> arrange(desc(n))
 
 
-# write out using fst ~20Mb
-gbif_reptilia_MSA %>%
-  tidylog::filter(!is.na(msa_name)) %>% # ~190k remaining
-  cbind(., st_coordinates(.)) %>%
-  st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_reptilia_MSA_'
-                        , Sys.Date(), '.fst'))
-
-rm(sf_reptilia, gbif_reptilia_MSA)
+# # write out using fst ~14.7Mb
+# gbif_reptilia_MSA %>%
+#   tidylog::filter(!is.na(msa_name)) %>% # ~190k remaining
+#   cbind(., st_coordinates(.)) %>%
+#   st_set_geometry(NULL) |> 
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_reptilia_MSA_'
+#                         , Sys.Date(), '.fst'))
+# 
+# rm(sf_reptilia, gbif_reptilia_MSA)
 
 ```
 
@@ -484,7 +509,7 @@ rm(sf_reptilia, gbif_reptilia_MSA)
 ```{r eval=FALSE, include=FALSE}
 
 (sf_amphibia <- # 300k records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/download_amphibia_2023-01-01.fst') |>
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_amphibia_2023-01-22.fst') |>
    mutate(taxon = 'Amphibia', .before = 1) |> 
    st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
  )
@@ -505,18 +530,19 @@ tic(); (gbif_amphibia_MSA <-
 
 # 2x checks
 gbif_amphibia_MSA |> glimpse()
-gbif_amphibia_MSA |> tabyl(msa_name)
+gbif_amphibia_MSA |> tabyl(msa_name) |> tibble() |> arrange(desc(n))
 
 
-# write out using fst ~10Mb
-gbif_amphibia_MSA %>%
-  tidylog::filter(!is.na(msa_name)) %>% # ~131k remaining
-  cbind(., st_coordinates(.)) %>%
-  st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_amphibia_MSA_'
-                        , Sys.Date(), '.fst'))
+# # write out using fst ~10Mb
+# gbif_amphibia_MSA %>%
+#   tidylog::filter(!is.na(msa_name)) %>% # ~131k remaining
+#   cbind(., st_coordinates(.)) %>%
+#   st_set_geometry(NULL) |> 
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_amphibia_MSA_'
+#                         , Sys.Date(), '.fst'))
+# 
+# rm(sf_amphibia, gbif_amphibia_MSA)
 
-rm(sf_amphibia, gbif_amphibia_MSA)
 ```
 
 

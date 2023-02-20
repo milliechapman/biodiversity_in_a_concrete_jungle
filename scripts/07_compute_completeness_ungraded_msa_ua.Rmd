@@ -1,0 +1,2472 @@
+---
+title: "05_compute_completeness"
+author: "Dexter H. Locke, PhD"
+date: "`r format(Sys.time())`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+minor change.
+
+start loop
+A: query for ith polygon's bio div
+B: create diretory for outputs
+C: setwd to that new location
+D: run KnowBPolygon on an individual MSA
+E: run KnowBPolygon on an individual Urban Area 
+
+repeat A-D for next facet of biodiversity
+end loop
+
+read in many files, stack them up, save out
+delete the directories chalk-full of 1-line CSVs
+
+or ith loop for polygons and jth loop for facet of biodiversitiy?
+or on process for MSA donut and one for Urban Area donut?
+
+- MSA and urban areas (and birds and plants) in a big for loop on a per polygon basis.
+
+- add records per km2
+- when computing completeness, just use species, don't concatenate with genus.
+  * fungi and insecta REPEAT at the family level when doing completeness
+     - sensitivity analyses.
+
+WHAT? - Make sure we drop unknown species (or family)
+
+- DONE rewrite Aves in proper for loop, not 21 times..
+- DONE: Basis of records - ditch some categories
+  * remove fossil and material citation
+- DONE: Species with no names - cut?
+    * leave genus and species NA.. ADD family for all facets of biodiversity
+
+
+- MSA vs urban areas
+  Added urban areas
+  
+  
+- Data by source - I have retained the iNat/e-bird/other classification but am not really set up to run those subsets smoothly. I would just repeat some scripts once per type.. not so elegant but workable. 
+  * keep those codes going forward? certainly retain in download
+  
+- I have an unexpected message when using group_by and summarize where my 'solution' is an ungroup, but I don't understand why it is needed.. fresh perspectives would be most welcomed
+  * nobody cares :-)
+  
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# 0 set up: load libraries, custom functions, set defaults
+```{r}
+
+# load libraries
+# packages we'll be using
+packs <- c(
+    'tidyverse'  # a must have
+  , 'tidylog'    # prints out what was done in dplyr and tidr
+  # , 'gbifdb' # GBIF
+  , 'fst' # a faster table, makes outputs files much smaller, too.
+  # , 'terra'
+  , 'KnowBR'    # creates biodiversity estimates like completeness.
+  , 'sf'        # spatial support
+  , 'mapview'   # webmaps
+  , 'janitor'   # cleans things up, also pipe-friendly cross-tabulations
+  , 'tictoc'    # times things
+  , 'beepr'     # makes noises
+)
+
+
+# check for all of the libraries, install if you don't have them
+if (length(setdiff(packs, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packs, rownames(installed.packages())))  
+}
+
+# load them
+vapply(packs, library, character.only = TRUE, logical(1), logical.return = TRUE, quietly = TRUE)
+
+
+
+# set custom function for getting spatial data
+see_sf <- function(){
+# what's in memory that are sf - spatial features?
+keep(eapply(.GlobalEnv, class),      # gets the objects in the global environment
+     ~ any(str_detect(., "sf"))) %>% # selects elements with sf in them
+    names(.) %>% as.character(.)     # my simple features
+}
+
+see_sf() -> sf_in_memory
+
+# what are the spatial references of those SF classes?
+mget(sf_in_memory) %>% purrr::map(~st_crs(.x)$epsg) %>% unlist() #%>% View()
+
+
+# # get file size
+# for(obj in ls()){message(obj); print(object.size(get(obj)), units='auto'); cat('\n')}; rm(obj)
+
+# thanks Phil Donovan @philip_donovan
+# https://www.spatialanalytics.co.nz/post/2018/04/01/fixing-st-par/
+# Paralise any simple features analysis.
+st_parallel <- function(sf_df, sf_func, n_cores, ...){
+
+  # Create a vector to split the data set up by.
+  split_vector <- rep(1:n_cores, each = nrow(sf_df) / n_cores, length.out = nrow(sf_df))
+
+  # Perform GIS analysis
+  split_results <- split(sf_df, split_vector) %>%
+    parallel::mclapply(function(x) sf_func(x, ...), mc.cores = n_cores)
+
+
+  # Define the output_class. If length is greater than two, then grab the second variable.
+  output_class <- class(split_results[[1]])
+  if (length(output_class) == 2){
+    output_class <- output_class[2]
+  }
+
+  # Combine results back together. Method of combining depends on the output from the function.
+  if (output_class == "matrix"){
+    result <- do.call("rbind", split_results)
+    names(result) <- NULL
+  } else if (output_class == "sfc") {
+    result <- do.call("c", split_results)
+    result <- sf_func(result) # do.call combines the list but there are still n_cores of the geometry which had been split up. Running st_union or st_collect gathers them up into one, as is the expected output of these two functions.
+  } else if (output_class %in% c('list', 'sgbp') ){
+    result <- do.call("c", split_results)
+    names(result) <- NULL
+  } else if (output_class == "data.frame" ){
+    result <- do.call("rbind", split_results)
+  } else {
+    stop("Unknown class. st_parallel only accepts the following outputs at present: sfc, list, sf, matrix, sgbp.")
+  }
+
+  # Return result
+  return(result)
+}
+
+
+# Paralise any simple features analysis.
+# https://www.spatialanalytics.co.nz/post/2017/09/11/a-parallel-function-for-spatial-analysis-in-r/
+# define
+st_par <- function(sf_df, sf_func, n_cores, ...){
+  # Create a vector to split the data set up by.
+  split_vector <- rep(1:n_cores, each = nrow(sf_df) / n_cores, length.out = nrow(sf_df))
+  
+  # Perform GIS analysis
+  split_results <- split(sf_df, split_vector) %>%
+    parallel::mclapply(function(x) sf_func(x, ...), mc.cores = n_cores)
+  
+  # Combine results back together. Method of combining depends on the output from the function.
+  if (class(split_results[[1]]) == 'list' ){
+    result <- do.call("c", split_results)
+    names(result) <- NULL
+    } else {
+      result <- do.call("rbind", split_results)
+      }
+  # Return result
+  return(result)
+  }
+
+# custom function for "Not In"
+`%nin%` <- Negate(`%in%`)
+
+
+# redlining colors
+holc_pal <- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              #, '#A9A9A9'
+              ) # dark gray)
+
+holc_pal_f<- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              , '#A9A9A9'
+              , '#000000')
+
+# fixes mapview
+mapviewOptions(fgb = FALSE)
+
+sf::sf_use_s2(FALSE) # supresses error in some sf operations
+
+
+data(adworld) # needed for KnowBPolygon
+```
+
+
+# 1 read in spatial data
+## A MSAs and UAs
+```{r}
+
+
+# msa_ungraded <- st_read('working_data/MSA_donut/msa_ungraded.gpkg') |> as_Spatial() # for KnowBPolygon
+#  ua_ungraded <- st_read('working_data/UA_donut/UA_ungraded_2023-01-23 16-05-42.gpkg') |> as_Spatial() # for KnowBPolygon
+
+(msa_ungraded_tbl <- st_read('working_data/MSA_donut/msa_ungraded.gpkg', as_tibble = TRUE) |> 
+   st_drop_geometry() |> 
+   select(msa_GEOID, msa_name)
+)
+
+(ua_ungraded_tbl <- 
+   st_read('working_data/UA_donut/UA_ungraded_2023-01-23 16-05-42.gpkg', as_tibble = TRUE) |> 
+   st_drop_geometry() |> 
+   select(ua_GEOID = GEOID, ua_name = NAME))
+ 
+# ua_ungraded <-
+#   ua_ungraded |>
+#   st_as_sf() |>
+#   rename(ua_GEOID = GEOID, ua_name = NAME) |>
+#   as_Spatial()
+
+# # map
+# msa_ungraded |> mapview(alpha.regions = 0) + mapview(ua_ungraded)
+
+```
+
+
+## B holc polygons - is this even needed for right now?
+```{r}
+
+# sf::sf_use_s2(FALSE) # supresses error about invalid loops in 1212, 2851
+# # https://stackoverflow.com/questions/68478179/how-to-resolve-spherical-geometry-failures-when-joining-spatial-data
+# 
+# tic(); (holc <- 
+#           st_read("https://dsl.richmond.edu/panorama/redlining/static/fullDownload.geojson") |> 
+#           # st_read('input_data/HOLC_shapefile/holc_ad_data.shp', as_tibble = TRUE) |> 
+#           filter(!is.na(holc_grade) & holc_grade != 'E') %>%
+#           st_cast('POLYGON') %>% # IMPORTANT
+#           filter(!st_is_empty(.)) %>% 
+#           st_make_valid(.) %>% 
+#           rowid_to_column() %>% 
+#           rowid_to_column(var = 'global_id') %>% 
+#           # rowid_to_column(var = 'internal_id') %>% # TODO get this squeeky clean
+#           mutate(  id = paste(state, city, holc_id, holc_grade, rowid, sep = '_')
+#                  , city_state = paste0(city, ', ', state)
+#                  , area_holc_km2 = as.double(st_area(.) / 1e+6)) %>% 
+#   select(id, global_id, state, city, holc_id, holc_grade, city_state, area_holc_km2));toc() # < 5 seconds
+
+# *** OR ***
+
+# NOTICE !!! as_Spatial was failing because 'FL_Jacksonville_B3_B_1404' is a linstring, not a polygon
+# F FL but go 'Gators!
+(holc <- st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg') |> 
+  filter(st_is(geom, 'POLYGON')) |> 
+  as_Spatial()) # for KnowBPolygon
+
+
+# map sample holc polygons
+holc[holc$city == 'Baltimore',] |> 
+  mapview(zcol =   'holc_grade'
+                , col.regions = holc_pal)
+```
+
+
+## C KnowBPolygon prep
+```{r eval=FALSE, include=FALSE}
+# create directory for completeness outputs for MSA
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_MSA'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_MSA'))
+        , FALSE)
+
+# create directory for completeness outputs for UA
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_UA'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_UA'))
+        , FALSE)
+```
+
+Make data ready for KnowBPolygon via grouping and selecting
+
+# 2 run KnowBPolygon MSA
+## A fungi - Done
+```{r}
+
+
+# work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
+(
+  fungi_not_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_fungi_holc_2023-01-23.fst') |> 
+    filter(holc_grade == 'Not Graded') |>                   # NOT GRADED
+    select(species, n_obs, X, Y, msa_GEOID) |>              # ID cut, msa_GEOID added
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, msa_GEOID) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, msa_GEOID) |> # cosmetic reorder
+    data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+fungi_not_holc |> dim()
+fungi_not_holc |> tail()
+fungi_not_holc |> arrange(desc(counts))
+fungi_not_holc |> tabyl(msa_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for fungi within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_MSA/fungi_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_MSA/fungi_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_MSA/fungi_not_graded')) # FUNGUS
+getwd()
+
+# FEWEST observations to MOST - this is running 'backwards' to see if we hit memory limit
+(iterator <-
+    fungi_not_holc |> 
+    group_by(msa_GEOID) |> 
+    # count() |> arrange(desc(n)) |> 
+    count() |> arrange(n) |> 
+    pull(msa_GEOID)
+  )
+
+
+tic(); for(i in iterator){
+  # where are we
+  msa_ungraded_tbl |> filter(msa_GEOID == i) |> print()
+  
+  
+  # make a folder for that MSA
+  ifelse( !dir.exists(paste0('msa_', i))
+        , dir.create(paste0('msa_', i))
+        , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/msa_', i))
+  getwd()
+  
+  # protect against low/no count observations
+  if(fungi_not_holc |> filter(msa_GEOID == i) |> nrow() > 3){
+    
+  # the main event
+  tic(); KnowBPolygon(  data = fungi_not_holc |> filter(msa_GEOID == i) 
+                      , format = 'A'
+                      # , shape = msa_ungraded[msa_ungraded$msa_GEOID == i,] # filtering shape and 
+                      # , shapenames = 'msa_GEOID'
+                      , save = 'CSV'
+                      , dec = '.'
+                      , jpg = FALSE
+                      , Maps = FALSE
+                      ); toc(); beep()
+    
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+  }; toc()
+
+
+# clean up
+rm(fungi_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+## B fungi-family level - Done
+```{r}
+
+# work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
+(
+  fungi_not_holc <- # notice name
+  read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_fungi_holc_2023-01-23.fst') |> 
+  filter(holc_grade == 'Not Graded') |>                   # NOT GRADED
+  select(family, n_obs, X, Y, msa_GEOID) |>              # ID cut, msa_GEOID added
+  filter(!is.na(family)) |> 
+  group_by(family, X, Y, msa_GEOID) |> 
+  count(name = 'counts') |> 
+  ungroup() |> 
+  select(family, lon = X, lat = Y, counts, msa_GEOID) |> # cosmetic reorder
+  data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+fungi_not_holc |> dim()
+fungi_not_holc |> tail()
+fungi_not_holc |> arrange(desc(counts))
+fungi_not_holc |> tabyl(msa_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for fungi within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_MSA/fungi_not_graded_family_level'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_MSA/fungi_not_graded_family_level'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_MSA/fungi_not_graded_family_level')) # FUNGUS @ family
+getwd()
+
+
+# FEWEST observations to MOST - this is running 'backwards' to see if we hit memory limit
+(iterator <-
+    fungi_not_holc |> 
+    group_by(msa_GEOID) |> 
+    # count() |> arrange(desc(n)) |> 
+    count() |> arrange(n) |> 
+    pull(msa_GEOID)
+  )
+
+
+
+tic(); for(i in iterator){
+  # where are we
+  msa_ungraded_tbl |> filter(msa_GEOID == i) |> print()
+  
+  
+  # make a folder for that MSA
+  ifelse( !dir.exists(paste0('msa_', i))
+          , dir.create(paste0('msa_', i))
+          , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/msa_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(fungi_not_holc |> filter(msa_GEOID == i) |> nrow() > 3){
+    
+  # the main event
+  tic(); KnowBPolygon(  data = fungi_not_holc |> filter(msa_GEOID == i) 
+                        , format = 'A'
+                        # , shape = msa_ungraded[msa_ungraded$msa_GEOID == i,] # filtering shape and 
+                        # , shapenames = 'msa_GEOID'
+                        , save = 'CSV'
+                        , dec = '.'
+                        , jpg = FALSE
+                        , Maps = FALSE
+                        ); toc(); beep()
+    
+  } 
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+}; toc()
+
+
+# clean up
+rm(fungi_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+## C plantae (memory blow out via plantae_not_graded_MSA.R) - needs to be updated with scripts above and below
+```{r eval=FALSE, include=FALSE}
+
+
+# work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
+(
+  plantae_not_holc <- # notice name
+  read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_plantae_holc_2023-01-23.fst') |> 
+  filter(holc_grade == 'Not Graded') |>                   # NOT GRADED
+  select(species, n_obs, X, Y, msa_GEOID) |>              # ID cut, msa_GEOID added
+  filter(!is.na(species)) |> 
+  group_by(species, X, Y, msa_GEOID) |> 
+  count(name = 'counts') |> 
+  ungroup() |> 
+  select(species, lon = X, lat = Y, counts, msa_GEOID) |> # cosmetic reorder
+  data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+plantae_not_holc |> dim()
+plantae_not_holc |> tail()
+plantae_not_holc |> arrange(desc(counts))
+plantae_not_holc |> tabyl(msa_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for plantae within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_MSA/plantae_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_MSA/plantae_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_MSA/plantae_not_graded')) # FUNGUS
+getwd()
+
+
+# FEWEST observations to MOST - this is running 'backwards' to see if we hit memory limit
+(iterator <-
+    plantae_not_holc |> 
+    group_by(msa_GEOID) |> 
+    # count() |> arrange(desc(n)) |> 
+    count() |> arrange(n) |> 
+    pull(msa_GEOID)
+  )
+
+i <- '41740' #'41860' # '19100' #'31080'
+tic(); for(i in iterator){
+  # where are we
+  msa_ungraded_tbl |> filter(msa_GEOID == i) |> print()
+  
+  # make a folder for that MSA
+  ifelse( !dir.exists(paste0('msa_', i))
+          , dir.create(paste0('msa_', i))
+          , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/msa_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(plantae_not_holc |> filter(msa_GEOID == i) |> nrow() > 3){
+  
+  # the main event
+  tic(); KnowBPolygon(  data = plantae_not_holc |> filter(msa_GEOID == i) 
+                        , format = 'A'
+                        # , shape = msa_ungraded[msa_ungraded$msa_GEOID == i,] # filtering shape and 
+                        # , shapenames = 'msa_GEOID'
+                        , save = 'CSV'
+                        , dec = '.'
+                        , jpg = FALSE
+                        , Maps = FALSE
+                        ); toc(); beep()
+    }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+}; toc()
+
+
+
+# clean up
+rm(plantae_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+## C aves - missing the largest 4
+```{r}
+
+
+list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/aves')
+
+
+(aves_files <- 
+    list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/aves'
+               , recursive = TRUE
+               , full.names = TRUE))
+
+
+
+# # sloppy but works (all of the columns, growing a vector [ewwey])
+# # good to know though for when we want to look at non-graded areas!
+# tic(); for(i in 1:length(aves_files)){
+#   print(i)
+#   if(i == 1){ aves_holc <- read_fst(aves_files[i]) }
+#   else      { aves_holc <- rbind(aves_holc, read_fst(aves_files[i])) }
+#   }; toc(); beepr::beep() # ~2 mins
+# 
+# aves_holc |> dim() # 51,591,321 records!
+
+
+# sloppy but works (all of the columns, growing a vector [ewwey])
+tic(); for(i in 1:length(aves_files)){
+  print(i)
+  if(i == 1){
+    
+    aves_not_holc <- 
+      read_fst(aves_files[i]) |> 
+      select(species, n_obs, X, Y, msa_GEOID) |>              # ID cut, msa_GEOID added
+      filter(!is.na(species)) |> 
+      group_by(species, X, Y, msa_GEOID) |> 
+      count(name = 'counts') |> 
+      ungroup() |> 
+      select(species, lon = X, lat = Y, counts, msa_GEOID) |> # cosmetic reorder
+      data.frame()                                            # KnowBPolygon doesn't like tibble
+    
+    }
+  else{
+
+    aves_not_holc <- 
+      read_fst(aves_files[i]) |> 
+      select(species, n_obs, X, Y, msa_GEOID) |>              # ID cut, ua_GEOID added
+      filter(!is.na(species)) |> 
+      group_by(species, X, Y, msa_GEOID) |> 
+      count(name = 'counts') |> 
+      ungroup() |> 
+      select(species, lon = X, lat = Y, counts, msa_GEOID) |> # cosmetic reorder
+      data.frame()                                            # KnowBPolygon doesn't like tibble
+    
+    }
+  }; toc(); beepr::beep() # ~15 minutes
+
+
+# 2x checks
+aves_not_holc |> dim() # 8,622,349 records
+aves_not_holc |> tail()
+aves_not_holc |> arrange(desc(counts))
+aves_not_holc |> tabyl(msa_GEOID) |> tibble() |> arrange(desc(n))
+
+
+# create directory for completeness outputs for plantae within ungraded uas
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_MSA/aves_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_MSA/aves_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_MSA/aves_not_graded')) # BIRDS
+getwd()
+
+
+# most observations to fewest
+(iterator <-
+    aves_not_holc |> 
+    group_by(msa_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(msa_GEOID)
+  )
+
+
+# cut out largest 4 - too big!
+# (iterator <- iterator[5:145]) # cut out biggest too
+
+tic(); for(i in iterator){
+  # where are we
+  msa_ungraded_tbl |> filter(msa_GEOID == i) |> print()
+  
+  # make a folder for that MSA
+  ifelse( !dir.exists(paste0('msa_', i))
+          , dir.create(paste0('msa_', i))
+          , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/msa_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(aves_not_holc |> filter(msa_GEOID == i) |> nrow() > 3){
+    
+    
+  # the main event
+  tic(); KnowBPolygon(  data = aves_not_holc |> filter(msa_GEOID == i) 
+                        , format = 'A'
+                        # , shape = ua_ungraded[ua_ungraded$ua_GEOID == i,] # filtering shape and 
+                        # , shapenames = 'ua_GEOID'
+                        , save = 'CSV'
+                        , dec = '.'
+                        , jpg = FALSE
+                        , Maps = FALSE
+  ); toc(); beep()
+    
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+}; toc()
+
+
+
+# clean up
+rm(aves_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+
+```
+
+
+## E insecta - Done ~34hrs
+```{r}
+
+
+# work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
+(
+  insecta_not_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_insecta_holc_2023-01-23.fst') |> 
+    filter(holc_grade == 'Not Graded') |>                   # NOT GRADED
+    select(species, n_obs, X, Y, msa_GEOID) |>              # ID cut, msa_GEOID added
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, msa_GEOID) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, msa_GEOID) |> # cosmetic reorder
+    data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+insecta_not_holc |> dim()
+insecta_not_holc |> tail()
+insecta_not_holc |> arrange(desc(counts))
+insecta_not_holc |> tabyl(msa_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for insecta within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_MSA/insecta_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_MSA/insecta_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_MSA/insecta_not_graded')) # FUNGUS
+getwd()
+
+# most observations to fewest
+(iterator <-
+    insecta_not_holc |> 
+    group_by(msa_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(msa_GEOID)
+  )
+
+
+tic(); for(i in iterator){
+  # where are we
+  msa_ungraded_tbl |> filter(msa_GEOID == i) |> print()
+  
+  
+  # make a folder for that MSA
+  ifelse( !dir.exists(paste0('msa_', i))
+        , dir.create(paste0('msa_', i))
+        , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/msa_', i))
+  getwd()
+  
+  # protect against low/no count observations
+  if(insecta_not_holc |> filter(msa_GEOID == i) |> nrow() > 3){
+    
+  # the main event
+  tic(); KnowBPolygon(  data = insecta_not_holc |> filter(msa_GEOID == i) 
+                      , format = 'A'
+                      # , shape = msa_ungraded[msa_ungraded$msa_GEOID == i,] # filtering shape and 
+                      # , shapenames = 'msa_GEOID'
+                      , save = 'CSV'
+                      , dec = '.'
+                      , jpg = FALSE
+                      , Maps = FALSE
+                      ); toc(); beep()
+    
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+  }; toc()
+
+
+# clean up
+rm(insecta_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+## F insecta - family - Done ~35 mins
+```{r}
+(
+  insecta_not_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_insecta_holc_2023-01-23.fst') |> 
+    filter(holc_grade == 'Not Graded') |>                   # NOT GRADED
+    select(family, n_obs, X, Y, msa_GEOID) |>              # ID cut, msa_GEOID added
+    filter(!is.na(family)) |> 
+    group_by(family, X, Y, msa_GEOID) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(family, lon = X, lat = Y, counts, msa_GEOID) |> # cosmetic reorder
+    data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+
+# 2x checks
+insecta_not_holc |> dim()
+insecta_not_holc |> tail()
+insecta_not_holc |> arrange(desc(counts))
+insecta_not_holc |> tabyl(msa_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for insecta within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_MSA/insecta_not_graded_family_level'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_MSA/insecta_not_graded_family_level'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_MSA/insecta_not_graded_family_level'))
+getwd()
+
+
+# most observations to fewest
+(iterator <-
+    insecta_not_holc |> 
+    group_by(msa_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(msa_GEOID)
+  )
+
+
+tic(); for(i in iterator){
+  # where are we
+  msa_ungraded_tbl |> filter(msa_GEOID == i) |> print()
+  
+  
+  # make a folder for that MSA
+  ifelse( !dir.exists(paste0('msa_', i))
+        , dir.create(paste0('msa_', i))
+        , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/msa_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(insecta_not_holc |> filter(msa_GEOID == i) |> nrow() > 3){
+    
+  # the main event
+  tic(); KnowBPolygon(  data = insecta_not_holc |> filter(msa_GEOID == i) 
+                      , format = 'A'
+                      # , shape = msa_ungraded[msa_ungraded$msa_GEOID == i,] # filtering shape and 
+                      # , shapenames = 'msa_GEOID'
+                      , save = 'CSV'
+                      , dec = '.'
+                      , jpg = FALSE
+                      , Maps = FALSE
+                      ); toc(); beep()
+    
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+  }; toc()
+
+
+# clean up
+rm(insecta_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+## G mammalia - Done
+```{r}
+
+
+# work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
+(
+  mammalia_not_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_mammalia_holc_2023-01-23.fst') |> 
+    filter(holc_grade == 'Not Graded') |>                   # NOT GRADED
+    select(species, n_obs, X, Y, msa_GEOID) |>              # ID cut, msa_GEOID added
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, msa_GEOID) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, msa_GEOID) |> # cosmetic reorder
+    data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+mammalia_not_holc |> dim()
+mammalia_not_holc |> tail()
+mammalia_not_holc |> arrange(desc(counts))
+mammalia_not_holc |> tabyl(msa_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for mammalia within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_MSA/mammalia_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_MSA/mammalia_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_MSA/mammalia_not_graded'))
+getwd()
+
+# most observations to fewest
+(iterator <-
+    mammalia_not_holc |> 
+    group_by(msa_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(msa_GEOID)
+  )
+
+
+tic(); for(i in iterator){
+  # where are we
+  msa_ungraded_tbl |> filter(msa_GEOID == i) |> print()
+  
+  
+  # make a folder for that MSA
+  ifelse( !dir.exists(paste0('msa_', i))
+        , dir.create(paste0('msa_', i))
+        , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/msa_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(mammalia_not_holc |> filter(msa_GEOID == i) |> nrow() > 3){
+    
+  # the main event
+  tic(); KnowBPolygon(  data = mammalia_not_holc |> filter(msa_GEOID == i) 
+                      , format = 'A'
+                      # , shape = msa_ungraded[msa_ungraded$msa_GEOID == i,] # filtering shape and 
+                      # , shapenames = 'msa_GEOID'
+                      , save = 'CSV'
+                      , dec = '.'
+                      , jpg = FALSE
+                      , Maps = FALSE
+                      ); toc(); beep()
+    
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+  }; toc()
+
+
+# clean up
+rm(mammalia_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+## H reptilia (aka Squamata!) - DONE
+```{r}
+
+
+# work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
+(
+  reptilia_not_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_reptilia_holc_2023-01-23.fst') |> 
+    filter(holc_grade == 'Not Graded') |>                   # NOT GRADED
+    select(species, n_obs, X, Y, msa_GEOID) |>              # ID cut, msa_GEOID added
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, msa_GEOID) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, msa_GEOID) |> # cosmetic reorder
+    data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+reptilia_not_holc |> dim()
+reptilia_not_holc |> tail()
+reptilia_not_holc |> arrange(desc(counts))
+reptilia_not_holc |> tabyl(msa_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for reptilia within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_MSA/reptilia_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_MSA/reptilia_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_MSA/reptilia_not_graded')) # FUNGUS
+getwd()
+
+# most observations to fewest
+(iterator <-
+    reptilia_not_holc |> 
+    group_by(msa_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(msa_GEOID)
+  )
+
+
+tic(); for(i in iterator){
+  # where are we
+  msa_ungraded_tbl |> filter(msa_GEOID == i) |> print()
+  
+  
+  # make a folder for that MSA
+  ifelse( !dir.exists(paste0('msa_', i))
+        , dir.create(paste0('msa_', i))
+        , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/msa_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(reptilia_not_holc |> filter(msa_GEOID == i) |> nrow() > 3){
+    
+  # the main event
+  tic(); KnowBPolygon(  data = reptilia_not_holc |> filter(msa_GEOID == i) 
+                      , format = 'A'
+                      # , shape = msa_ungraded[msa_ungraded$msa_GEOID == i,] # filtering shape and 
+                      # , shapenames = 'msa_GEOID'
+                      , save = 'CSV'
+                      , dec = '.'
+                      , jpg = FALSE
+                      , Maps = FALSE
+                      ); toc(); beep()
+    
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+  }; toc()
+
+
+# clean up
+rm(reptilia_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+## I amphibia - DONE
+```{r}
+
+
+# work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
+(
+  amphibia_not_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_amphibia_holc_2023-01-23.fst') |> 
+    filter(holc_grade == 'Not Graded') |>                   # NOT GRADED
+    select(species, n_obs, X, Y, msa_GEOID) |>              # ID cut, msa_GEOID added
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, msa_GEOID) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, msa_GEOID) |> # cosmetic reorder
+    data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+amphibia_not_holc |> dim()
+amphibia_not_holc |> tail()
+amphibia_not_holc |> arrange(desc(counts))
+amphibia_not_holc |> tabyl(msa_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for amphibia within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_MSA/amphibia_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_MSA/amphibia_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_MSA/amphibia_not_graded')) # FUNGUS
+getwd()
+
+# most observations to fewest
+(iterator <-
+    amphibia_not_holc |> 
+    group_by(msa_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(msa_GEOID)
+  )
+
+
+tic(); for(i in iterator){
+  # where are we
+  msa_ungraded_tbl |> filter(msa_GEOID == i) |> print()
+  
+  
+  # make a folder for that MSA
+  ifelse( !dir.exists(paste0('msa_', i))
+        , dir.create(paste0('msa_', i))
+        , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/msa_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(amphibia_not_holc |> filter(msa_GEOID == i) |> nrow() > 3){
+    
+  # the main event
+  tic(); KnowBPolygon(  data = amphibia_not_holc |> filter(msa_GEOID == i) 
+                      , format = 'A'
+                      # , shape = msa_ungraded[msa_ungraded$msa_GEOID == i,] # filtering shape and 
+                      # , shapenames = 'msa_GEOID'
+                      , save = 'CSV'
+                      , dec = '.'
+                      , jpg = FALSE
+                      , Maps = FALSE
+                      ); toc(); beep()
+    
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+  }; toc()
+
+
+# clean up
+rm(amphibia_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+# 3 pre-join gbif to urban areas with holc erased
+this is kind of like 03_filter_gbif_by_MSAs.Rmd but for UAs.. but at the time I (DHL) didn't realize 
+we might be interested in UAs.
+## A fungi - Done ~25 mins
+```{r}
+
+# create directory gbif points per biodiversity group spatially filtered to Urban Areas
+ifelse( !dir.exists('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/')
+       , dir.create('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/'), FALSE)
+
+
+tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_fungi_2023-01-22.fst') |>
+  mutate(taxon = 'Fungi', .before = 1) |> 
+  st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326)) %>% 
+  st_par(.
+         , ua_ungraded |> rename(ua_GEOID = GEOID, ua_name = NAME)
+         , n_cores = 12
+         , sf_func = st_join
+         , join = st_within) |> 
+  tidylog::filter(!is.na(ua_name)) %>%
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_fungi_UA_donut_'
+                        , Sys.Date(), '.fst')); toc()
+
+```
+
+
+## B plantea - Done ~ 2hr
+```{r}
+
+tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_plantae_2023-01-22.fst') |>
+  mutate(taxon = 'Plantae', .before = 1) |> 
+  st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326)) %>% 
+  st_par(.
+         , ua_ungraded |> rename(ua_GEOID = GEOID, ua_name = NAME)
+         , n_cores = 12
+         , sf_func = st_join
+         , join = st_within) |> 
+  tidylog::filter(!is.na(ua_name)) %>%
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_plantea_UA_donut_'
+                        , Sys.Date(), '.fst')); toc()
+
+```
+
+
+## C aves by year - crashed comp on last year. Ran last year alone successfully
+```{r}
+# create directory gbif points per biodiversity group spatially filtered to UAs
+ifelse( !dir.exists('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/aves')
+       , dir.create('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/aves'), FALSE)
+
+
+
+# since aves are in separate folder, no need for pattern matching, much safer than previous version
+(aves_files <- 
+  list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/aves'
+             # , pattern = 'aves'
+             , full.names = TRUE))
+
+
+for(i in 1:length(aves_files)){
+  
+  # track progress
+  print(i); print(aves_files[i])
+  
+  # extract year, used for naming files when saving out later
+  (year <- aves_files[i] |> 
+    str_remove('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/aves/download_aves_') |> 
+    str_sub(1, 4))
+  
+  # read in the annual bird data
+  sf_aves <-
+    read_fst(aves_files[i]) |>
+    mutate(taxon = 'Aves', .before = 1) |>
+    st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326))
+  
+  # spatially join GBIF to UAs
+  tic()
+  gbif_aves_UA <- 
+    st_par(  sf_aves
+           , ua_ungraded |> st_as_sf() |> rename(ua_GEOID = GEOID, ua_name = NAME) # type convert
+           , n_cores = 10
+           , sf_func = st_join
+           , join = st_within)
+  toc(); beep()
+  
+  # write out using fst
+  gbif_aves_UA %>%
+  tidylog::filter(!is.na(ua_name)) %>%
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/aves/aves_UA_'
+                        , year
+                        , '_'
+                        , Sys.Date(), '.fst'))
+  
+  rm(sf_aves, gbif_aves_UA)
+  }
+
+
+```
+
+
+## D insecta - Done ~23 mins
+```{r}
+
+tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_insecta_2023-01-22.fst') |>
+  mutate(taxon = 'Insecta', .before = 1) |> 
+  st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326)) %>% 
+  st_par(.
+         , ua_ungraded |> rename(ua_GEOID = GEOID, ua_name = NAME)
+         , n_cores = 10
+         , sf_func = st_join
+         , join = st_within) |>
+  tidylog::filter(!is.na(ua_name)) %>%
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_insecta_UA_donut_'
+                        , Sys.Date(), '.fst')); toc()
+
+```
+
+
+## E mammalia - Done ~4:15
+```{r}
+
+tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_mammalia_2023-01-22.fst') |>
+  mutate(taxon = 'Mammalia', .before = 1) |> 
+  st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326)) %>% 
+  st_par(.
+         , ua_ungraded |> rename(ua_GEOID = GEOID, ua_name = NAME)
+         , n_cores = 10
+         , sf_func = st_join
+         , join = st_within) |>
+  tidylog::filter(!is.na(ua_name)) %>%
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_mammalian_UA_donut_'
+                        , Sys.Date(), '.fst')); toc()
+
+```
+
+
+## F reptilia (aka squamata) - Done
+```{r}
+
+tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_reptilia_2023-01-22.fst') |>
+  mutate(taxon = 'Reptilia', .before = 1) |> 
+  st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326)) %>% 
+  st_par(.
+         , ua_ungraded |> rename(ua_GEOID = GEOID, ua_name = NAME)
+         , n_cores = 10
+         , sf_func = st_join
+         , join = st_within) |>
+  tidylog::filter(!is.na(ua_name)) %>%
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_reptilian_UA_donut_'
+                        , Sys.Date(), '.fst')); toc()
+
+```
+
+
+## G amphibia - Done
+```{r}
+
+tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_amphibia_2023-01-22.fst') |>
+  mutate(taxon = 'Amphibia', .before = 1) |> 
+  st_as_sf(coords = c('decimallongitude', 'decimallatitude'), crs = st_crs(4326)) %>% 
+  st_par(.
+         , ua_ungraded |> rename(ua_GEOID = GEOID, ua_name = NAME)
+         , n_cores = 10
+         , sf_func = st_join
+         , join = st_within) |>
+  tidylog::filter(!is.na(ua_name)) %>%
+  cbind(., st_coordinates(.)) %>%
+  st_set_geometry(NULL) |> 
+  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_amphibian_UA_donut_'
+                        , Sys.Date(), '.fst')); toc()
+
+```
+
+
+# 4 KnowBpolygon on urban areas without HOLC
+## A fungi - working kinks out of KnowBPolygon with multiparts..ugh JUST TURN SHAPE OFF
+```{r eval=FALSE, include=FALSE}
+
+# TRASH
+# # work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
+# (
+#   fungi_not_holc <- # notice name
+#     read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_fungi_UA_donut_2023-01-29.fst') |> # NOT GRADED
+#     select(species, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
+#     filter(!is.na(species)) |> 
+#     group_by(species, X, Y, ua_GEOID) |> 
+#     count(name = 'counts') |> 
+#     ungroup() |> 
+#     select(species, lon = X, lat = Y, counts, ua_GEOID) |> # cosmetic reorder
+#     data.frame()                                            # KnowBPolygon doesn't like tibble
+# )
+# 
+# 
+# 
+# # 2x checks
+# fungi_not_holc |> dim()
+# fungi_not_holc |> tail()
+# fungi_not_holc |> arrange(desc(counts))
+# fungi_not_holc |> tabyl(ua_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+# 
+# 
+# # create directory for completeness outputs for fungi within ungraded MSAs
+# ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_UA/fungi_not_graded'))
+#         , dir.create(paste0(getwd(), '/working_data/completeness_UA/fungi_not_graded'))
+#         , FALSE)
+# 
+# setwd(paste0(getwd(), '/working_data/completeness_UA/fungi_not_graded')) # FUNGUS
+# getwd()
+# 
+# 
+# # ua_ungraded <- 
+# #   ua_ungraded |> 
+# #   st_as_sf() |> 
+# #   rename(ua_GEOID = GEOID, ua_name = NAME) |> 
+# #   as_Spatial()
+# 
+# i<- 22042
+# i <- '03817'
+# # i <- '22042' # "Dallas--Fort Worth--Arlington, TX Urbanized Area (2010)"
+# fungi_not_holc |> filter(ua_GEOID == i) |> st_as_sf(coords = c('lon', 'lat'), crs = st_crs(4326)) |>
+#   mapview() +
+#   mapview(test |> st_bbox() |> st_as_sfc(), col.regions = 'red')
+#   # mapview(ua_ungraded[ua_ungraded$ua_GEOID == i,])
+# # 
+# # rm(i)
+# ( 
+# ua_ungraded[ua_ungraded$ua_GEOID == i,] |> # rearanging polygons largest to smallest
+#    st_as_sf() |> 
+#    st_cast('POLYGON') %>%
+#    mutate(area_m2 = st_area(.)) |> 
+#    arrange(desc(area_m2)) |>
+#    # arrange(area_m2) |>
+#    slice(8) |>
+#    select(-area_m2) |> 
+#    group_by(ua_GEOID, ua_name, ua_populationE, ua_populationM, ua_area_km2) |> # dissolve and keep attributes
+#    summarise() |> ungroup() |> 
+#    as_Spatial() -> test
+#  )
+# 
+# # ua_ungraded[ua_ungraded$ua_GEOID == i,] |> st_as_sf() |>  st_cast('POLYGON') %>%
+# #    mutate(area_m2 = st_area(.)) |> rowid_to_column() |> arrange(desc(area_m2))
+# 
+#  tic(); KnowBPolygon(  data = fungi_not_holc |> filter(ua_GEOID == i) 
+#                       , format = 'A'
+#                       # , shape =  ua_ungraded[ua_ungraded$ua_GEOID == i,] # filtering shape and 
+#                       # , shape =  test 
+#                       , shape = test |> st_bbox() |> st_as_sfc() |> st_as_sf() |> mutate(ua_GEOID = i) |> as_Spatial()
+#                       , shapenames = 'ua_GEOID'
+#                       , save = 'CSV'
+#                       , dec = '.'
+#                       , jpg = FALSE
+#                       , Maps = FALSE
+#                       ); toc(); beep()
+# 
+# ua_ungraded |> 
+#   st_as_sf() |> 
+#   st_cast('POLYGON') |> 
+#   group_by(ua_name) |> 
+#   count() |> 
+#   arrange(desc(n))
+#   filter(n == 1)
+# 
+# (iterator <- 
+#   ua_ungraded |> 
+#   st_as_sf() |> 
+#   st_drop_geometry() |> 
+#   arrange(desc(ua_area_km2)) |> # largest areas first
+#   filter(ua_GEOID != '22042') |> # Dallas
+#   filter(ua_GEOID != '56602') |> # 
+#   filter(ua_GEOID != '69184') |> # Phoenix
+#   filter(ua_GEOID != '69697') |> # Pittsburgh
+#   filter(ua_GEOID != '16885') |> # Cincinnati
+#   pull(ua_GEOID))
+# 
+# 
+# i <- 86302
+# tic(); for(i in iterator){
+#   # where are we
+#   print(i)
+#   ua_ungraded |> st_as_sf() |> st_drop_geometry() |> filter(ua_GEOID == i) |> pull(ua_name) |> print()
+#   
+#   # when are we at
+#   print(Sys.time())
+#   
+#   
+#   # make a folder for that MSA
+#   ifelse( !dir.exists(paste0('ua_TEST2', i))
+#         , dir.create(paste0('ua_TEST2', i))
+#         , FALSE)
+#   
+#   # set the working directory to that new place
+#   setwd(paste0(getwd(), '/ua_TEST2', i)) # FUNGUS
+#   getwd()
+#   
+#   # the main event
+#   tic(); KnowBPolygon(  data = fungi_not_holc |> filter(ua_GEOID == i) 
+#                       , format = 'A'
+#                       # , shape = ua_ungraded[ua_ungraded$ua_GEOID == i,] # filtering shape and
+#                       # , shape = ua_ungraded |>
+#                       #       st_as_sf() |>
+#                       #       filter(ua_GEOID == i) |>
+#                       #       st_bbox() |>
+#                       #       st_as_sfc() |>
+#                       #       st_as_sf() |>
+#                       #       mutate(ua_GEOID = i) |>
+#                       #       as_Spatial()
+#                       # , shapenames = 'ua_GEOID'
+#                       , save = 'CSV'
+#                       , dec = '.'
+#                       , jpg = FALSE
+#                       , Maps = FALSE
+#                       ); toc(); beep()
+#   
+#   # clean up
+#   file.remove('Species per site.CSV')
+#   file.remove('Inf.txt')
+#   file.remove('Standard error of the estimators.CSV')
+#   
+#   # a little reset
+#   setwd('../')
+#   }; toc(); beep()
+# 
+# 
+# # clean up
+# rm(fungi_not_holc)
+# 
+# # RESET THE WORKING DIRECTORY
+# setwd('../../../')
+# getwd()
+
+```
+
+## B fungi - Done
+```{r}
+
+# work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
+(
+  fungi_not_holc <- # notice name
+  read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_fungi_UA_donut_2023-01-29.fst') |> # NOT GRADED
+  select(species, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
+  filter(!is.na(species)) |> 
+  group_by(species, X, Y, ua_GEOID) |> 
+  count(name = 'counts') |> 
+  ungroup() |> 
+  select(species, lon = X, lat = Y, counts, ua_GEOID) |> # cosmetic reorder
+  data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+fungi_not_holc |> dim()
+fungi_not_holc |> tail()
+fungi_not_holc |> arrange(desc(counts))
+fungi_not_holc |> tabyl(ua_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for fungi within ungraded UAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_UA/fungi_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_UA/fungi_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_UA/fungi_not_graded')) # FUNGUS @ family
+getwd()
+
+
+
+# most observations to fewest: subsequent loops will get shorter in duration.. if the first UA doesn't cause memory problems
+# the next ones won't either 
+(iterator <-
+    fungi_not_holc |> 
+    group_by(ua_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(ua_GEOID)
+  )
+
+
+tic(); for(i in iterator){
+  # where are we
+  ua_ungraded_tbl |> filter(ua_GEOID == i) |> print()
+  
+  # make a folder for that ua
+  ifelse( !dir.exists(paste0('ua_', i))
+          , dir.create(paste0('ua_', i))
+          , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/ua_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(fungi_not_holc |> filter(ua_GEOID == i) |> nrow() > 3){
+    
+    # the main event
+    tic(); KnowBPolygon(  data = fungi_not_holc |> filter(ua_GEOID == i) 
+                        , format = 'A'
+                        # , shape = ua_ungraded[ua_ungraded$GEOID == i,] # filtering shape and 
+                        # , shapenames = 'ua_GEOID'
+                        , save = 'CSV'
+                        , dec = '.'
+                        , jpg = FALSE
+                        , Maps = FALSE
+    ); toc(); beep()
+    
+    }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+}; toc(); beep()
+
+
+# clean up
+rm(fungi_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+## B fungi-family level - Done
+```{r}
+
+# work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
+(
+  fungi_not_holc <- # notice name
+  read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_fungi_UA_donut_2023-01-29.fst') |> 
+  select(family, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
+  filter(!is.na(family)) |> 
+  group_by(family, X, Y, ua_GEOID) |> 
+  count(name = 'counts') |> 
+  ungroup() |> 
+  select(family, lon = X, lat = Y, counts, ua_GEOID) |> # cosmetic reorder
+  data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+fungi_not_holc |> dim()
+fungi_not_holc |> tail()
+fungi_not_holc |> arrange(desc(counts))
+fungi_not_holc |> tabyl(ua_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for fungi within ungraded UAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_UA/fungi_not_graded_family_level'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_UA/fungi_not_graded_family_level'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_UA/fungi_not_graded_family_level')) # FUNGUS @ family
+getwd()
+
+# most observations to fewest
+(iterator <-
+    fungi_not_holc |> 
+    group_by(ua_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(ua_GEOID)
+  )
+
+
+tic(); for(i in iterator){
+  # where are we
+  ua_ungraded_tbl |> filter(ua_GEOID == i) |> print()
+  
+  # make a folder for that ua
+  ifelse( !dir.exists(paste0('ua_', i))
+          , dir.create(paste0('ua_', i))
+          , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/ua_', i)) # FUNGUS
+  getwd()
+  
+   # protect against low/no count observations
+  if(fungi_not_holc |> filter(ua_GEOID == i) |> nrow() > 3){
+    
+    # the main event
+    tic(); KnowBPolygon(  data = fungi_not_holc |> filter(ua_GEOID == i) 
+                        , format = 'A'
+                        # , shape = ua_ungraded[ua_ungraded$GEOID == i,] # filtering shape and 
+                        # , shapenames = 'ua_GEOID'
+                        , save = 'CSV'
+                        , dec = '.'
+                        , jpg = FALSE
+                        , Maps = FALSE
+  ); toc(); beep()
+    
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+}; toc(); beep()
+
+
+# clean up
+rm(fungi_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+## C plantae - MEMORY OVERLOAD - missing largest polygons
+```{r}
+
+
+# work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
+(
+  plantae_not_holc <- # notice name
+  read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_plantea_UA_donut_2023-01-29.fst') |> 
+  select(species, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
+  filter(!is.na(species)) |> 
+  group_by(species, X, Y, ua_GEOID) |> 
+  count(name = 'counts') |> 
+  ungroup() |> 
+  select(species, lon = X, lat = Y, counts, ua_GEOID) |> # cosmetic reorder
+  data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+plantae_not_holc |> dim()
+plantae_not_holc |> tail()
+plantae_not_holc |> arrange(desc(counts))
+plantae_not_holc |> tabyl(ua_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for plantae within ungraded uas
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_UA/plantae_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_UA/plantae_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_UA/plantae_not_graded')) # PLANTS
+getwd()
+
+
+# most observations to fewest
+(iterator <-
+    plantae_not_holc |> 
+    group_by(ua_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(ua_GEOID)
+  )
+
+(iterator <- iterator[3:146]) # cut out biggest too
+
+tic(); for(i in iterator){
+  # where are we
+  ua_ungraded_tbl |> filter(ua_GEOID == i) |> print()
+  
+  # make a folder for that UA
+  ifelse( !dir.exists(paste0('ua_', i))
+          , dir.create(paste0('ua_', i))
+          , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/ua_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(plantae_not_holc |> filter(ua_GEOID == i) |> nrow() > 3){
+    
+    
+  # the main event
+  tic(); KnowBPolygon(  data = plantae_not_holc |> filter(ua_GEOID == i) 
+                        , format = 'A'
+                        # , shape = ua_ungraded[ua_ungraded$ua_GEOID == i,] # filtering shape and 
+                        # , shapenames = 'ua_GEOID'
+                        , save = 'CSV'
+                        , dec = '.'
+                        , jpg = FALSE
+                        , Maps = FALSE
+  ); toc(); beep()
+    
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+}; toc()
+
+
+
+# clean up
+rm(plantae_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+## D aves - Missing biggest UA: NYC
+```{r eval=FALSE, include=FALSE}
+
+
+list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/aves')
+
+
+(aves_files <- 
+    list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/aves'
+               , recursive = TRUE
+               , full.names = TRUE))
+
+
+
+# # sloppy but works (all of the columns, growing a vector [ewwey])
+# # good to know though for when we want to look at non-graded areas!
+# tic(); for(i in 1:length(aves_files)){
+#   print(i)
+#   if(i == 1){ aves_holc <- read_fst(aves_files[i]) }
+#   else      { aves_holc <- rbind(aves_holc, read_fst(aves_files[i])) }
+#   }; toc(); beepr::beep() # ~2 mins
+# 
+# aves_holc |> dim() # 51,591,321 records!
+
+
+# sloppy but works (all of the columns, growing a vector [ewwey])
+tic(); for(i in 1:length(aves_files)){
+  print(i)
+  if(i == 1){
+    
+    aves_not_holc <- 
+      read_fst(aves_files[i]) |> 
+      select(species, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
+      filter(!is.na(species)) |> 
+      group_by(species, X, Y, ua_GEOID) |> 
+      count(name = 'counts') |> 
+      ungroup() |> 
+      select(species, lon = X, lat = Y, counts, ua_GEOID) |> # cosmetic reorder
+      data.frame()                                            # KnowBPolygon doesn't like tibble
+    
+    }
+  else{
+
+    aves_not_holc <- 
+      read_fst(aves_files[i]) |> 
+      select(species, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
+      filter(!is.na(species)) |> 
+      group_by(species, X, Y, ua_GEOID) |> 
+      count(name = 'counts') |> 
+      ungroup() |> 
+      select(species, lon = X, lat = Y, counts, ua_GEOID) |> # cosmetic reorder
+      data.frame()                                            # KnowBPolygon doesn't like tibble
+    
+    }
+  }; toc(); beepr::beep() # ~6.5 minutes
+
+
+# 2x checks
+aves_not_holc |> dim() # 3,767,774 records
+aves_not_holc |> tail()
+aves_not_holc |> arrange(desc(counts))
+aves_not_holc |> tabyl(ua_GEOID) |> tibble()
+
+
+# create directory for completeness outputs for plantae within ungraded uas
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_UA/aves_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_UA/aves_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_UA/aves_not_graded')) # BIRDS
+getwd()
+
+
+# most observations to fewest
+(iterator <-
+    aves_not_holc |> 
+    group_by(ua_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(ua_GEOID)
+  )
+
+
+# cut out largest 63217, NYC
+# (iterator <- iterator[2:146]) # cut out biggest too
+
+tic(); for(i in iterator){
+  # where are we
+  ua_ungraded_tbl |> filter(ua_GEOID == i) |> print()
+  
+  # make a folder for that UA
+  ifelse( !dir.exists(paste0('ua_', i))
+          , dir.create(paste0('ua_', i))
+          , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/ua_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(aves_not_holc |> filter(ua_GEOID == i) |> nrow() > 3){
+    
+    
+  # the main event
+  tic(); KnowBPolygon(  data = aves_not_holc |> filter(ua_GEOID == i) 
+                        , format = 'A'
+                        # , shape = ua_ungraded[ua_ungraded$ua_GEOID == i,] # filtering shape and 
+                        # , shapenames = 'ua_GEOID'
+                        , save = 'CSV'
+                        , dec = '.'
+                        , jpg = FALSE
+                        , Maps = FALSE
+  ); toc(); beep()
+    
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+}; toc()
+
+
+
+# clean up
+rm(aves_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+
+```
+
+
+## E insecta - Done
+```{r}
+
+
+# work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
+(
+  insecta_not_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_insecta_UA_donut_2023-01-29.fst') |> 
+    select(species, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, ua_GEOID) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, ua_GEOID) |> # cosmetic reorder
+    data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+insecta_not_holc |> dim()
+insecta_not_holc |> tail()
+insecta_not_holc |> arrange(desc(counts))
+insecta_not_holc |> tabyl(ua_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for insecta within ungraded UAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_UA/insecta_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_UA/insecta_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_UA/insecta_not_graded')) # FUNGUS
+getwd()
+
+# most observations to fewest
+(iterator <-
+    insecta_not_holc |> 
+    group_by(ua_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(ua_GEOID)
+  )
+
+
+tic(); for(i in iterator){
+  # where are we
+  ua_ungraded_tbl |> filter(ua_GEOID == i) |> print()
+  
+  # make a folder for that ua
+  ifelse( !dir.exists(paste0('ua_', i))
+        , dir.create(paste0('ua_', i))
+        , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/ua_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(insecta_not_holc |> filter(ua_GEOID == i) |> nrow() > 3){
+  
+  # the main event
+  tic(); KnowBPolygon(  data = insecta_not_holc |> filter(ua_GEOID == i) 
+                      , format = 'A'
+                      # , shape = ua_ungraded[ua_ungraded$ua_GEOID == i,] # filtering shape and 
+                      # , shapenames = 'ua_GEOID'
+                      , save = 'CSV'
+                      , dec = '.'
+                      , jpg = FALSE
+                      , Maps = FALSE
+                      ); toc() #; beep()
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+  }; toc()
+
+# clean up
+rm(insecta_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+
+```
+
+## F insecta - family - Done
+```{r}
+
+
+# work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
+(
+  insecta_not_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_insecta_UA_donut_2023-01-29.fst') |> 
+    select(family, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
+    filter(!is.na(family)) |> 
+    group_by(family, X, Y, ua_GEOID) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(family, lon = X, lat = Y, counts, ua_GEOID) |> # cosmetic reorder
+    data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+                                     # KnowBPolygon doesn't like tibble
+
+# 2x checks
+insecta_not_holc |> dim()
+insecta_not_holc |> tail()
+insecta_not_holc |> arrange(desc(counts))
+insecta_not_holc |> tabyl(ua_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for insecta within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_UA/insecta_not_graded_family_level'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_UA/insecta_not_graded_family_level'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_UA/insecta_not_graded_family_level'))
+
+
+# most observations to fewest
+(iterator <-
+    insecta_not_holc |> 
+    group_by(ua_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(ua_GEOID)
+  )
+
+
+
+tic(); for(i in iterator){
+  # where are we
+  ua_ungraded_tbl |> filter(ua_GEOID == i) |> print()
+
+  # make a folder for that ua
+  ifelse( !dir.exists(paste0('ua_', i))
+        , dir.create(paste0('ua_', i))
+        , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/ua_', i)) # FUNGUS
+  getwd()
+  
+  
+  # protect against low/no count observations
+  if(insecta_not_holc |> filter(ua_GEOID == i) |> nrow() > 3){
+    
+  # the main event
+  tic(); KnowBPolygon(  data = insecta_not_holc |> filter(ua_GEOID == i) 
+                      , format = 'A'
+                      # , shape = ua_ungraded[ua_ungraded$ua_GEOID == i,] # filtering shape and 
+                      # , shapenames = 'ua_GEOID'
+                      , save = 'CSV'
+                      , dec = '.'
+                      , jpg = FALSE
+                      , Maps = FALSE
+                      ); toc(); beep()
+    
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+  }; toc()
+
+
+# clean up
+rm(insecta_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+
+```
+
+## G mammalia - Done
+```{r}
+
+
+# work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
+(
+  mammalia_not_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_mammalian_UA_donut_2023-01-29.fst') |> 
+    select(species, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, ua_GEOID) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, ua_GEOID) |> # cosmetic reorder
+    data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+mammalia_not_holc |> dim()
+mammalia_not_holc |> tail()
+mammalia_not_holc |> arrange(desc(counts))
+mammalia_not_holc |> tabyl(ua_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for mammalia within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_UA/mammalia_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_UA/mammalia_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_UA/mammalia_not_graded')) # FUNGUS
+getwd()
+
+
+# most observations to fewest
+(iterator <-
+    mammalia_not_holc |> 
+    group_by(ua_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(ua_GEOID)
+  )
+
+
+
+tic(); for(i in iterator){
+  # where are we
+  ua_ungraded_tbl |> filter(ua_GEOID == i) |> print()
+  
+  # make a folder for that ua
+  ifelse( !dir.exists(paste0('ua_', i))
+        , dir.create(paste0('ua_', i))
+        , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/ua_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(mammalia_not_holc |> filter(ua_GEOID == i) |> nrow() > 3){
+    
+  # the main event
+  tic(); KnowBPolygon(  data = mammalia_not_holc |> filter(ua_GEOID == i) 
+                      , format = 'A'
+                      # , shape = ua_ungraded[ua_ungraded$ua_GEOID == i,] # filtering shape and 
+                      # , shapenames = 'ua_GEOID'
+                      , save = 'CSV'
+                      , dec = '.'
+                      , jpg = FALSE
+                      , Maps = FALSE
+                      ); toc(); beep()
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+  }; toc()
+
+
+# clean up
+rm(mammalia_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+
+```
+
+## H reptilia (aka Squamata!) - Done
+```{r}
+
+
+# work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
+(
+  reptilia_not_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_reptilian_UA_donut_2023-01-29.fst') |> 
+    select(species, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, ua_GEOID) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, ua_GEOID) |> # cosmetic reorder
+    data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+reptilia_not_holc |> dim()
+reptilia_not_holc |> tail()
+reptilia_not_holc |> arrange(desc(counts))
+reptilia_not_holc |> tabyl(ua_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for reptilia within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_UA/reptilia_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_UA/reptilia_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_UA/reptilia_not_graded')) # FUNGUS
+getwd()
+
+
+# most observations to fewest
+(iterator <-
+    reptilia_not_holc |> 
+    group_by(ua_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(ua_GEOID)
+  )
+
+
+
+tic(); for(i in iterator){
+  # where are we
+  ua_ungraded_tbl |> filter(ua_GEOID == i) |> print()
+  
+  # make a folder for that ua
+  ifelse( !dir.exists(paste0('ua_', i))
+        , dir.create(paste0('ua_', i))
+        , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/ua_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(reptilia_not_holc |> filter(ua_GEOID == i) |> nrow() > 3){
+    
+  # the main event
+  tic(); KnowBPolygon(  data = reptilia_not_holc |> filter(ua_GEOID == i) 
+                      , format = 'A'
+                      # , shape = ua_ungraded[ua_ungraded$ua_GEOID == i,] # filtering shape and 
+                      # , shapenames = 'ua_GEOID'
+                      , save = 'CSV'
+                      , dec = '.'
+                      , jpg = FALSE
+                      , Maps = FALSE
+                      ); toc() #; beep()
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+  }; toc()
+
+
+# clean up
+rm(reptilia_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+
+```
+
+## I amphibia  - Done
+```{r}
+
+# work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
+(
+  amphibia_not_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_amphibian_UA_donut_2023-01-29.fst') |> 
+    select(species, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, ua_GEOID) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, ua_GEOID) |> # cosmetic reorder
+    data.frame()                                            # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+amphibia_not_holc |> dim()
+amphibia_not_holc |> tail()
+amphibia_not_holc |> arrange(desc(counts))
+amphibia_not_holc |> tabyl(ua_GEOID) |> tibble() |> arrange(desc(n)) # is this legit?
+
+
+# create directory for completeness outputs for amphibia within ungraded MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness_UA/amphibia_not_graded'))
+        , dir.create(paste0(getwd(), '/working_data/completeness_UA/amphibia_not_graded'))
+        , FALSE)
+
+setwd(paste0(getwd(), '/working_data/completeness_UA/amphibia_not_graded')) # FUNGUS
+getwd()
+
+
+# most observations to fewest
+(iterator <-
+    amphibia_not_holc |> 
+    group_by(ua_GEOID) |> 
+    count() |> arrange(desc(n)) |> 
+    pull(ua_GEOID)
+  )
+
+
+tic(); for(i in iterator){
+  # where are we
+  ua_ungraded_tbl |> filter(ua_GEOID == i) |> print()
+  
+  # make a folder for that ua
+  ifelse( !dir.exists(paste0('ua_', i))
+        , dir.create(paste0('ua_', i))
+        , FALSE)
+  
+  # set the working directory to that new place
+  setwd(paste0(getwd(), '/ua_', i)) # FUNGUS
+  getwd()
+  
+  # protect against low/no count observations
+  if(amphibia_not_holc |> filter(ua_GEOID == i) |> nrow() > 3){
+    
+  # the main event
+  tic(); KnowBPolygon(  data = amphibia_not_holc |> filter(ua_GEOID == i) 
+                      , format = 'A'
+                      # , shape = ua_ungraded[ua_ungraded$ua_GEOID == i,] # filtering shape and 
+                      # , shapenames = 'ua_GEOID'
+                      , save = 'CSV'
+                      , dec = '.'
+                      , jpg = FALSE
+                      , Maps = FALSE
+                      ); toc() #; beep()
+  }
+  
+  # clean up
+  file.remove('Species per site.CSV')
+  file.remove('Inf.txt')
+  file.remove('Standard error of the estimators.CSV')
+  
+  # a little reset
+  setwd('../')
+  }; toc()
+
+
+# clean up
+rm(amphibia_not_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+
+```
+
+
+
+
+
+# 5 what is the relationship between size and speed for KnowBPolygon
+```{r}
+
+speed_size <- 
+  tribble(
+    ~domain,    ~size, ~speed,   ~taxon,
+ 'holc poly',    13310,     40,   'fungi',
+ 'holc poly',    13310,     40,   'fungi family', # cut cuz redundant
+ 'holc poly',   865190,   2751,   'plantae',      # ~45 minutes
+ 'holc poly',  2001497,   7000,   'aves',         # 1:56
+ 'holc poly',   116597,    451,   'insecta',      # ~7.5 mins
+ 'holc poly',   112843,    396,   'insecta family', # ~6.5 mins
+ 'holc poly',    16104,     56,   'mammalia',
+ 'holc poly',     8020,     25,   'reptilia',
+ 'holc poly',     3209,     16,   'amphibia',  # (aka Squamata!) tk
+ 
+ 'msa donut',   294721,   6244,   'fungi',        # 1:40
+ 'msa donut',   225054,    386,   'fungi family',
+ # 'msa donut',       NA,     NA,   'plantae',      # 5:23:35 memory blow out fail
+ 'msa donut', 8622349,   10642,   'aves',
+ 'msa donut',  1574403, 114273,   'insecta',        # 1 day and ~8 hrs
+ 'msa donut',  1396038,   2062,   'insecta family',
+ 'msa donut',   201728,    292,   'mammalia',
+ 'msa donut',   178676,    282,   'reptilia',
+ 'msa donut',   115143,    243,   'amphibia',
+ 
+ 'ua donut',    105406,   1369,   'fungi',
+ 'ua donut',     88089,    192,   'fungi family', 
+ 'ua donut',   1557630,  29050,   'plantae',        # memory overload
+ 'ua donut',   3767774,   5404,   'aves',           # 1.5 hrs
+ 'ua donut',    742924,  29223,   'insecta',        # ~8 hrs
+ 'ua donut',    681870,   1084,   'insecta family', # ~6.5 mins
+ 'ua donut',    107538,    236,   'mammalia',
+ 'ua donut',     85078,    150,   'reptilia',
+ 'ua donut',     40629,    110,   'amphibia'        # (aka Squamata!)
+  ) |> 
+  mutate(duration = hms::as_hms(speed)) #|> 
+  # filter(taxon == 'fungi' | taxon == 'insecta')
+
+
+speed_size |> 
+  ggplot(aes(size
+             # , speed
+             , duration
+             )) + 
+  # geom_line() +
+  geom_point(aes(color = taxon), size = 8
+             , alpha = .5) +
+  # geom_step() + 
+  # viridis::scale_color_viridis(discrete = TRUE) +
+  labs(y = 'duration (hours:minutes)') +
+  theme_bw(16) +
+  # https://stackoverflow.com/questions/50172591/use-scale-y-time-to-convert-ms-to-minutes-and-seconds-in-boxplot-ggplot
+  scale_y_time(labels = function(l) strftime(l, '%H:%M')) +
+  # scale_y_time(labels = function(l) strftime(l, '%e %H:%M')) + # DAY hours : minutes
+  # scale_x_continuous(labels = scales::comma) +
+  scale_x_log10(labels = scales::comma) +
+  facet_wrap(~domain
+             , scales = 'free_y'
+             ) +
+  NULL
+
+
+```
+
+
+delete the files too large to be uploaded to Git?
+```{r eval=FALSE, include=FALSE}
+
+
+# # inspiration - but change size less than 50 Mb, git's limit
+# # https://stackoverflow.com/questions/24782979/r-efficiently-delete-all-empty-files-in-a-directory
+# # All document names:
+# docs <- list.files(pattern = "*.txt")   
+# 
+# # Use file.size() immediate, instead of file.info(docs)$size:
+# inds <- file.size(docs) == 1 
+# 
+# # Remove all documents with file.size = 1 from the directory
+# file.remove(docs[inds])
+
+
+```
+
+
+## End
+
+# sand box

@@ -147,13 +147,17 @@ mapviewOptions(fgb = FALSE)
 
 sf::sf_use_s2(FALSE) # supresses error in some sf operations
 
+# create directory gbif points per biodiversity group spatially filtered to MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness'))
+       , dir.create(paste0(getwd(), '/working_data/completeness')), FALSE)
+
 
 data(adworld) # needed for KnowBPolygon
 ```
 
 
 # 1 read in spatial data
-## A holc polygons - is this even needed for right now?
+## A holc polygons
 ```{r}
 
 # sf::sf_use_s2(FALSE) # supresses error about invalid loops in 1212, 2851
@@ -189,12 +193,11 @@ holc |>
   # too many polygons at once.. filter by a state
   # filter(state == 'CA') |> 
   # filter(state == 'NY') |> 
-  # filter(state == 'MA') |> 
+  # filter(state == 'MA') |>
   mapview(zcol =   'holc_grade'
                 , col.regions = holc_pal)
   
 ```
-
 
 
 
@@ -294,10 +297,6 @@ tic(); KnowBPolygon(  #data = fungi_holc |> filter(id %in% random_id) |> data.fr
                      ); toc() # ~10 seconds for California, 8 without maps and figs, 12 seconds when fed ALL of holc polygons
 
 
-```
-
-### i fungi run - like above, but refined and for real
-```{r eval=FALSE, include=FALSE}
 
 # (
 #   fungi <- 
@@ -320,26 +319,53 @@ tic(); KnowBPolygon(  #data = fungi_holc |> filter(id %in% random_id) |> data.fr
 # fungi |> tabyl(holc_grade)
 
 
-# work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), *much* smaller
+# # work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), *much* smaller
+# (
+#   fungi_holc <- # notice name
+#     read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_holc_2023-01-01.fst') |> 
+#     # tibble() |> 
+#     filter(holc_grade != 'Not Graded') |> 
+#     select(genus, species, n_obs, X, Y, id) |> 
+#     unite(genus_species, genus, species, sep = '_') |> 
+#     filter(genus_species != 'NA_NA') |> # FIXME keep or not?
+#     group_by(genus_species, X, Y, id) |> 
+#     summarise(counts = sum(n_obs)) |> 
+#     ungroup() |> # FIXME why is needed at all?
+#     select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+#     data.frame()                                           # KnowBPolygon doesn't like tibble
+# )
+
+
+
+```
+
+### i fungi run - like above, but refined and for real
+```{r eval=FALSE, include=FALSE}
+
+
 (
   fungi_holc <- # notice name
-    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_holc_2023-01-01.fst') |> 
-    # tibble() |> 
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_fungi_holc_2023-01-23.fst') |> 
     filter(holc_grade != 'Not Graded') |> 
-    select(genus, species, n_obs, X, Y, id) |> 
-    unite(genus_species, genus, species, sep = '_') |> 
-    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
-    group_by(genus_species, X, Y, id) |> 
-    summarise(counts = sum(n_obs)) |> 
-    ungroup() |> # FIXME why is needed at all?
-    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
-    data.frame()                                           # KnowBPolygon doesn't like tibble
+    select(species, n_obs, X, Y, id) |> # tabyl(species) |> tail() |> 
+    filter(!is.na(species)) |> # NEEDED?
+    group_by(species, X, Y, id) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                     # KnowBPolygon doesn't like tibble
 )
+
 
 # 2x checks
 fungi_holc |> tail()
-fungi_holc |> arrange(desc(counts))
+fungi_holc |> arrange(desc(counts)) |> tibble()
 fungi_holc |> tabyl(id) |> tibble()
+
+
+# create directory gbif points per biodiversity group spatially filtered to HOLC polygons
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness/fungi_graded_only'))
+       , dir.create(paste0(getwd(), '/working_data/completeness/fungi_graded_only')), FALSE)
 
 
 setwd(paste0(getwd(), '/working_data/completeness/fungi_graded_only')) # FUNGUS
@@ -366,7 +392,7 @@ tic(); KnowBPolygon(  data = fungi_holc
                     #                ,"#FFC800FF"
                     #                ,"#FF6400FF"
                     #                ,"#FF0000FF")
-                    ); toc() # 45 seconds for 13,804 points in 9839 polygons
+                    ); toc() # 40 seconds for 13,310 points in 9839 polygons
 
 # clean up
 rm(fungi, fungi_holc)
@@ -374,37 +400,101 @@ rm(fungi, fungi_holc)
 # RESET THE WORKING DIRECTORY
 setwd('../../../')
 getwd()
+beep()
+
 ```
 
 
-### ii plantae
+### ii fungi run - FAMILY-level (will do this for insects, too)
+```{r eval=FALSE, include=FALSE}
+
+# FAMILIY LEVEL
+(
+  fungi_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_fungi_holc_2023-01-23.fst') |> 
+    filter(holc_grade != 'Not Graded') |> 
+    select(family, n_obs, X, Y, id) |> 
+    filter(!is.na(family)) |> # NEEDED?
+    group_by(family, X, Y, id) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(family, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                     # KnowBPolygon doesn't like tibble
+)
+
+
+# 2x checks
+fungi_holc |> tail()
+fungi_holc |> arrange(desc(counts)) |> tibble()
+fungi_holc |> tabyl(id) |> tibble()
+
+
+# create directory gbif points per biodiversity group spatially filtered to HOLC polygons
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness/fungi_graded_only_family_level'))
+       , dir.create(paste0(getwd(), '/working_data/completeness/fungi_graded_only_family_level')), FALSE)
+
+
+setwd(paste0(getwd(), '/working_data/completeness/fungi_graded_only_family_level')) # FUNGUS @Family
+getwd()
+
+
+tic(); KnowBPolygon(  data = fungi_holc 
+                    , format = 'A'
+                    , shape = holc
+                    , shapenames = 'id'
+                    , save = 'CSV'
+                    , dec = '.'
+                    , jpg = FALSE
+                    , Maps = FALSE
+                    ); toc() # 40 seconds for 13,134 points in 9839 polygons
+
+# clean up
+rm(fungi, fungi_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+beep()
+
+```
+
+
+
+### iii plantae
 ```{r eval=FALSE, include=FALSE}
 # work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), much smaller
+
+# plantae_graded_only
 
 
 (
   plantae_holc <- # notice name
-    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_holc_2023-01-01.fst') |> 
-    # tibble() |> 
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_plantae_holc_2023-01-23.fst') |> 
     filter(holc_grade != 'Not Graded') |> 
-    select(genus, species, n_obs, X, Y, id) |> 
-    unite(genus_species, genus, species, sep = '_') |> 
-    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
-    group_by(genus_species, X, Y, id) |> 
-    summarise(counts = sum(n_obs)) |> 
-    ungroup() |> # FIXME why is needed at all?
-    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
-    data.frame()                                           # KnowBPolygon doesn't like tibble
+    select(species, n_obs, X, Y, id) |> 
+    filter(!is.na(species)) |> # NEEDED?
+    group_by(species, X, Y, id) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                     # KnowBPolygon doesn't like tibble
 )
+
+
 
 # 2x checks
 plantae_holc |> dim()
 plantae_holc |> tail()
-plantae_holc |> arrange(desc(counts))
+plantae_holc |> arrange(desc(counts)) |> tibble()
 plantae_holc |> tabyl(id) |> tibble()
 
 
-setwd(paste0(getwd(), '/working_data/completeness/plantae_graded_only')) # FUNGUS
+# create directory gbif points per biodiversity group spatially filtered to HOLC polygons
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness/plantae_graded_only'))
+       , dir.create(paste0(getwd(), '/working_data/completeness/plantae_graded_only')), FALSE)
+
+
+setwd(paste0(getwd(), '/working_data/completeness/plantae_graded_only')) # PLANTS
 getwd()
 
 
@@ -416,8 +506,7 @@ tic(); KnowBPolygon(  data = plantae_holc
                     , dec = '.'
                     , jpg = FALSE
                     , Maps = FALSE
-                    ); toc() # 45 min for 918,255 points in 9839 polygons
-
+                    ); toc() # 45 min for 865,190 points in 9839 polygons
 
 # clean up
 rm(plantae, plantae_holc)
@@ -425,18 +514,20 @@ rm(plantae, plantae_holc)
 # RESET THE WORKING DIRECTORY
 setwd('../../../')
 getwd()
+beep()
 ```
 
-
-### iii aves by year
+### iv aves by year - return later
 ```{r eval=FALSE, include=FALSE}
+
 (aves_files <- 
-    list.files('../biodiversity_in_a_concrete_jungle_data_too_big'
-               , pattern = 'gbif_aves_holc' # MORE SPECIFIC THAN in script 03 and 04, bc it HAS TO BE
+    list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/aves'
                , full.names = TRUE))
+
 
 # # sloppy but works (all of the columns, growing a vector [ewwey])
 # # good to know though for when we want to look at non-graded areas!
+# # UPDATE: will do non-graded 1 polygon at a time)
 # tic(); for(i in 1:length(aves_files)){
 #   print(i)
 #   if(i == 1){ aves_holc <- read_fst(aves_files[i]) }
@@ -452,16 +543,15 @@ tic(); for(i in 1:length(aves_files)){
   if(i == 1){
     
     aves_holc <- 
-    read_fst(aves_files[i]) |> 
-    filter(holc_grade != 'Not Graded') |> 
-    select(genus, species, n_obs, X, Y, id) |> 
-    unite(genus_species, genus, species, sep = '_') |> 
-    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
-    group_by(genus_species, X, Y, id) |> 
-    summarise(counts = sum(n_obs)) |> 
-    ungroup() |> # FIXME why is needed at all?
-    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
-    data.frame()                                           # KnowBPolygon doesn't like tibble (needed?)
+      read_fst(aves_files[i]) |> 
+      filter(holc_grade != 'Not Graded') |> 
+      select(species, n_obs, X, Y, id) |> 
+      filter(!is.na(species)) |> 
+      group_by(species, X, Y, id) |> 
+      count(name = 'counts') |> 
+      ungroup() |> 
+      select(species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+      data.frame()                                     # KnowBPolygon doesn't like tibble
     
     }
   else{
@@ -470,24 +560,28 @@ tic(); for(i in 1:length(aves_files)){
       rbind(aves_holc
             , read_fst(aves_files[i]) |> 
               filter(holc_grade != 'Not Graded') |> 
-              select(genus, species, n_obs, X, Y, id) |> 
-              unite(genus_species, genus, species, sep = '_') |> 
-              filter(genus_species != 'NA_NA') |> # FIXME keep or not?
-              group_by(genus_species, X, Y, id) |> 
-              summarise(counts = sum(n_obs)) |> 
-              ungroup() |> # FIXME why is needed at all?
-              select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
-              data.frame()                                           # KnowBPolygon doesn't like tibble
-      )
+              select(species, n_obs, X, Y, id) |> 
+              filter(!is.na(species)) |> 
+              group_by(species, X, Y, id) |> 
+              count(name = 'counts') |> 
+              ungroup() |> 
+              select(species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+              data.frame()                                     # KnowBPolygon doesn't like tibble
+              )
     }
   }; toc(); beepr::beep() # ~36 SECONDS
 
 
+# create directory gbif points per biodiversity group spatially filtered to HOLC polygons
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness/aves_graded_only'))
+       , dir.create(paste0(getwd(), '/working_data/completeness/aves_graded_only')), FALSE)
+
+
 # 2x checks
-aves_holc |> dim() # 2,002,190 records
+aves_holc |> dim() # 2,001,497 now, not 2,002,190 records
 aves_holc |> tail()
 aves_holc |> arrange(desc(counts))
-aves_holc |> tabyl(id) |> tibble()
+aves_holc |> tabyl(id) |> tibble() |> arrange(desc(n))
 
 
 setwd(paste0(getwd(), '/working_data/completeness/aves_graded_only')) # FUNGUS
@@ -502,7 +596,7 @@ tic(); KnowBPolygon(  data = aves_holc
                     , dec = '.'
                     , jpg = FALSE
                     , Maps = FALSE
-                    ); toc() # 1:33 for 2,002,190 points in 9839 polygons
+                    ); toc() # 1:56 for 2,001,497 (old 2,002,190) points in 9839 polygons
 
 
 # clean up
@@ -511,10 +605,11 @@ rm(aves, aves_holc)
 # RESET THE WORKING DIRECTORY
 setwd('../../../')
 getwd()
+beep()
 
 ```
 
-### iv insecta
+### v insecta
 ```{r eval=FALSE, include=FALSE}
 
 # work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), much smaller
@@ -522,17 +617,15 @@ getwd()
 
 (
   insecta_holc <- # notice name
-    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_insecta_holc_2023-01-01.fst') |> 
-    # tibble() |> 
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_insecta_holc_2023-01-23.fst') |> 
     filter(holc_grade != 'Not Graded') |> 
-    select(genus, species, n_obs, X, Y, id) |> 
-    unite(genus_species, genus, species, sep = '_') |> 
-    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
-    group_by(genus_species, X, Y, id) |> 
-    summarise(counts = sum(n_obs)) |> 
-    ungroup() |> # FIXME why is needed at all?
-    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
-    data.frame()                                           # KnowBPolygon doesn't like tibble
+    select(species, n_obs, X, Y, id) |> 
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, id) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                     # KnowBPolygon doesn't like tibble
 )
 
 # 2x checks
@@ -541,8 +634,12 @@ insecta_holc |> tail()
 insecta_holc |> arrange(desc(counts))
 insecta_holc |> tabyl(id) |> tibble()
 
+# create directory gbif points per biodiversity group spatially filtered to HOLC polygons
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness/insecta_graded_only'))
+        , dir.create(paste0(getwd(), '/working_data/completeness/insecta_graded_only')), FALSE)
 
-setwd(paste0(getwd(), '/working_data/completeness/insecta_graded_only')) # FUNGUS
+
+setwd(paste0(getwd(), '/working_data/completeness/insecta_graded_only')) # INSECTS
 getwd()
 
 
@@ -554,7 +651,7 @@ tic(); KnowBPolygon(  data = insecta_holc
                     , dec = '.'
                     , jpg = FALSE
                     , Maps = FALSE
-                    ); toc() # 7 min for 121,489 points in 9839 polygons
+                    ); toc() # 7.5 min for 116,597 points in 9839 polygons
 
 
 # clean up
@@ -563,7 +660,62 @@ rm(insecta, insecta_holc)
 # RESET THE WORKING DIRECTORY
 setwd('../../../')
 getwd()
+beep()
+```
 
+### vi insecta - FAMILY-level (just like with fungi)
+```{r eval=FALSE, include=FALSE}
+
+# work only with data intersecting HOLC polygons per MSA (aka exclude the non-graded areas), much smaller
+
+
+(
+  insecta_holc <- # notice name
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_insecta_holc_2023-01-23.fst') |> 
+    filter(holc_grade != 'Not Graded') |> 
+    select(family, n_obs, X, Y, id) |> 
+    filter(!is.na(family)) |> 
+    group_by(family, X, Y, id) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(family, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                     # KnowBPolygon doesn't like tibble
+  )
+
+# 2x checks
+insecta_holc |> dim()
+insecta_holc |> tail()
+insecta_holc |> arrange(desc(counts))
+insecta_holc |> tabyl(id) |> tibble() |> arrange(desc(n))
+
+# create directory gbif points per biodiversity group spatially filtered to MSAs
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness/insecta_graded_only_family_level'))
+        , dir.create(paste0(getwd(), '/working_data/completeness/insecta_graded_only_family_level'))
+        , FALSE)
+
+
+setwd(paste0(getwd(), '/working_data/completeness/insecta_graded_only_family_level')) # FUNGUS @ famliy
+getwd()
+
+
+tic(); KnowBPolygon(  data = insecta_holc 
+                    , format = 'A'
+                    , shape = holc
+                    , shapenames = 'id'
+                    , save = 'CSV'
+                    , dec = '.'
+                    , jpg = FALSE
+                    , Maps = FALSE
+                    ); toc() # 6.5 min for 112,843 points in 9839 polygons
+
+
+# clean up
+rm(insecta, insecta_holc)
+
+# RESET THE WORKING DIRECTORY
+setwd('../../../')
+getwd()
+beep()
 ```
 
 ### v mammalia
@@ -573,18 +725,16 @@ getwd()
 
 (
   mammalia_holc <- # notice name
-    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_mammalia_holc_2023-01-01.fst') |> 
-    # tibble() |> 
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_mammalia_holc_2023-01-23.fst') |> 
     filter(holc_grade != 'Not Graded') |> 
-    select(genus, species, n_obs, X, Y, id) |> 
-    unite(genus_species, genus, species, sep = '_') |> 
-    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
-    group_by(genus_species, X, Y, id) |> 
-    summarise(counts = sum(n_obs)) |> 
-    ungroup() |> # FIXME why is needed at all?
-    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
-    data.frame()                                           # KnowBPolygon doesn't like tibble
-)
+    select(species, n_obs, X, Y, id) |> 
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, id) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                     # KnowBPolygon doesn't like tibble
+  )
 
 # 2x checks
 mammalia_holc |> dim()
@@ -592,8 +742,13 @@ mammalia_holc |> tail()
 mammalia_holc |> arrange(desc(counts))
 mammalia_holc |> tabyl(id) |> tibble()
 
+# create directory gbif points per biodiversity group spatially filtered to HOLC polygons
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness/mammalia_graded_only'))
+       , dir.create(paste0(getwd(), '/working_data/completeness/mammalia_graded_only'))
+       , FALSE)
 
-setwd(paste0(getwd(), '/working_data/completeness/mammalia_graded_only')) # FUNGUS
+
+setwd(paste0(getwd(), '/working_data/completeness/mammalia_graded_only')) # MAMMALS
 getwd()
 
 
@@ -605,8 +760,7 @@ tic(); KnowBPolygon(  data = mammalia_holc
                     , dec = '.'
                     , jpg = FALSE
                     , Maps = FALSE
-                    ); toc() # ~1 min for 16,104 points in 9839 polygons
-
+                    ); toc() # 56s for 16,104 points in 9839 polygons
 
 # clean up
 rm(mammalia, mammalia_holc)
@@ -614,6 +768,7 @@ rm(mammalia, mammalia_holc)
 # RESET THE WORKING DIRECTORY
 setwd('../../../')
 getwd()
+beep()
 
 ```
 
@@ -625,27 +780,31 @@ getwd()
 
 (
   reptilia_holc <- # notice name
-    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_reptilia_holc_2023-01-02.fst') |> # dif date
-    # tibble() |> 
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_reptilia_holc_2023-01-23.fst') |> 
     filter(holc_grade != 'Not Graded') |> 
-    select(genus, species, n_obs, X, Y, id) |> 
-    unite(genus_species, genus, species, sep = '_') |> 
-    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
-    group_by(genus_species, X, Y, id) |> 
-    summarise(counts = sum(n_obs)) |> 
-    ungroup() |> # FIXME why is needed at all?
-    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
-    data.frame()                                           # KnowBPolygon doesn't like tibble
-)
+    select(species, n_obs, X, Y, id) |> 
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, id) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                     # KnowBPolygon doesn't like tibble
+  )
 
 # 2x checks
 reptilia_holc |> dim()
 reptilia_holc |> tail()
 reptilia_holc |> arrange(desc(counts))
-reptilia_holc |> tabyl(id) |> tibble()
+reptilia_holc |> tabyl(id) |> tibble() |> arrange(desc(n))
 
 
-setwd(paste0(getwd(), '/working_data/completeness/reptilia_graded_only')) # FUNGUS
+
+# create directory gbif points per biodiversity group spatially filtered to HOLC polygons
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness/reptilia_graded_only'))
+        , dir.create(paste0(getwd(), '/working_data/completeness/reptilia_graded_only')), FALSE)
+
+
+setwd(paste0(getwd(), '/working_data/completeness/reptilia_graded_only')) # REPTILES
 getwd()
 
 
@@ -657,7 +816,7 @@ tic(); KnowBPolygon(  data = reptilia_holc
                     , dec = '.'
                     , jpg = FALSE
                     , Maps = FALSE
-                    ); toc() # ~24 seconds for 8,100 points in 9839 polygons
+                    ); toc() # ~25 seconds for 8,020 points in 9839 polygons
 
 
 # clean up
@@ -666,7 +825,7 @@ rm(reptilia, reptilia_holc)
 # RESET THE WORKING DIRECTORY
 setwd('../../../')
 getwd()
-
+beep()
 ```
 
 ### vii amphibia
@@ -677,27 +836,29 @@ getwd()
 
 (
   amphibia_holc <- # notice name
-    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_amphibia_holc_2023-01-01.fst') |> # dif date
-    # tibble() |> 
+    read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_amphibia_holc_2023-01-23.fst') |> 
     filter(holc_grade != 'Not Graded') |> 
-    select(genus, species, n_obs, X, Y, id) |> 
-    unite(genus_species, genus, species, sep = '_') |> 
-    filter(genus_species != 'NA_NA') |> # FIXME keep or not?
-    group_by(genus_species, X, Y, id) |> 
-    summarise(counts = sum(n_obs)) |> 
-    ungroup() |> # FIXME why is needed at all?
-    select(genus_species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
-    data.frame()                                           # KnowBPolygon doesn't like tibble
+    select(species, n_obs, X, Y, id) |> 
+    filter(!is.na(species)) |> 
+    group_by(species, X, Y, id) |> 
+    count(name = 'counts') |> 
+    ungroup() |> 
+    select(species, lon = X, lat = Y, counts, id) |> # cosmetic reorder
+    data.frame()                                     # KnowBPolygon doesn't like tibble
 )
 
 # 2x checks
 amphibia_holc |> dim()
 amphibia_holc |> tail()
 amphibia_holc |> arrange(desc(counts))
-amphibia_holc |> tabyl(id) |> tibble()
+amphibia_holc |> tabyl(id) |> tibble() |> arrange(desc(n))
 
+# create directory gbif points per biodiversity group spatially filtered to HOLC polygons
+ifelse( !dir.exists(paste0(getwd(), '/working_data/completeness/amphibia_graded_only'))
+       , dir.create(paste0(getwd(), '/working_data/completeness/amphibia_graded_only'))
+       , FALSE)
 
-setwd(paste0(getwd(), '/working_data/completeness/amphibia_graded_only')) # FUNGUS
+setwd(paste0(getwd(), '/working_data/completeness/amphibia_graded_only')) # AMPHIBIANS
 getwd()
 
 
@@ -709,7 +870,7 @@ tic(); KnowBPolygon(  data = amphibia_holc
                     , dec = '.'
                     , jpg = FALSE
                     , Maps = FALSE
-                    ); toc() # ~16 seconds for 3,229 points in 9839 polygons
+                    ); toc() # ~16 seconds for 3,209 points in 9839 polygons
 
 
 # clean up
@@ -718,22 +879,28 @@ rm(amphibia, amphibia_holc)
 # RESET THE WORKING DIRECTORY
 setwd('../../../')
 getwd()
+beep()
+
 ```
 
 
 # 2 what is the relationship between size and speed for KnowBPolygon
 ```{r}
 
+
+
 speed_size <- 
   tribble(
     ~size, ~speed,   ~taxon,
-    13804,     42,    'fungi',
-   918255,   2700,  'plantae', # 45 mins
-  2002190,   7200,     'aves', # 1:30
-   121489,    420,  'insecta', # 7 mins
-    16104,     60, 'mammalia',
-     8100,     24, 'reptilia',
-     3229,     16, 'amphibia'  # (aka Squamata!)
+    13310,     40,   'fungi',
+    13310,     40,   'fungi family', # cut cuz redundant
+   865190,   2751,   'plantae',      # ~45 minutes
+  2001497,   7000,   'aves',         # 1:56
+   116597,    451,   'insecta',      # ~7.5 mins
+   112843,    396,   'insecta family', # ~6.5 mins
+    16104,     56,   'mammalia',
+     8020,     25,   'reptilia',
+     3209,     16,   'amphibia'  # (aka Squamata!) tk
   ) |> 
   mutate(duration = hms::as_hms(speed))
 
@@ -743,12 +910,44 @@ speed_size |>
              , duration
              )) + 
   geom_line() +
-  geom_point(aes(color = taxon), size = 8) +
+  geom_point(aes(color = taxon), size = 8
+             , alpha = .5
+             ) +
   # geom_step() + 
+  labs(y = 'duration (hours:minutes)') +
   theme_bw(16) +
-  scale_x_continuous(labels = scales::comma) + 
+  # https://stackoverflow.com/questions/50172591/use-scale-y-time-to-convert-ms-to-minutes-and-seconds-in-boxplot-ggplot
+  scale_y_time(labels = function(l) strftime(l, '%H:%M')) + 
+  # scale_x_continuous(labels = scales::comma) +
+  scale_x_log10(labels = scales::comma) +
   NULL
 
+
+```
+
+
+# 3 clean up - delete files too large for git DANGER, proceed with CAUTION
+```{r}
+
+# The "Species per site.CSV" is often large and unnecessary. Its redundant. The large size will not sync on git
+# therefore delete. 
+
+# (files_to_delete <- 
+#   list.files('working_data/completeness'
+#              , recursive = TRUE
+#              , pattern = 'Species per site.CSV'
+#              , full.names = TRUE))
+# 
+# for(f in files_to_delete){
+#   print(f)
+#   file.remove(f) # CAUTION
+# }
+# 
+# (files_to_delete <- # check it
+#   list.files('working_data/completeness'
+#              , recursive = TRUE
+#              , pattern = 'Species per site.CSV'
+#              , full.names = TRUE))
 
 ```
 

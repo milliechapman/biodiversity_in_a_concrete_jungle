@@ -146,6 +146,10 @@ mapviewOptions(fgb = FALSE)
 
 sf::sf_use_s2(FALSE) # supresses error in some sf opperations
 
+# create directory gbif points per biodiversity group spatially filtered to MSAs
+ifelse( !dir.exists('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC')
+       , dir.create('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC'), FALSE)
+
 ```
 
 
@@ -160,7 +164,7 @@ msa_w_holc |> mapview()
 
 ```
 
-## B holc polygons - is this even needed for right now?
+## B holc polygons
 ```{r}
 
 # sf::sf_use_s2(FALSE) # supresses error about invalid loops in 1212, 2851
@@ -207,7 +211,7 @@ holc |>
 ```{r eval=FALSE, include=FALSE}
 
 (sf_fungi <- 
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_MSA_2023-01-01.fst') |> 
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_fungi_MSA_2023-01-22.fst') |> 
    st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
    )
 
@@ -226,14 +230,15 @@ gbif_fungi_holc |> glimpse()
 gbif_fungi_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
 
-# write out
-gbif_fungi_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
-  cbind(., st_coordinates(.)) %>%
-  st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_fungi_holc_', Sys.Date(), '.fst'))
-
-# clean up
-rm(sf_fungi, gbif_fungi_holc); gc()
+# # write out
+# gbif_fungi_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
+#   cbind(., st_coordinates(.)) %>%
+#   st_set_geometry(NULL) |> 
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_fungi_holc_'
+#                         , Sys.Date(), '.fst'))
+# 
+# # clean up
+# rm(sf_fungi, gbif_fungi_holc); gc()
 
 ```
 
@@ -241,7 +246,7 @@ rm(sf_fungi, gbif_fungi_holc); gc()
 ```{r eval=FALSE, include=FALSE}
 
 (sf_plantae <- # 4.3 million records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_MSA_2023-01-01.fst') |>
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_plantae_MSA_2023-01-22.fst') |> 
    st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
  )
 
@@ -253,30 +258,37 @@ tic(); (gbif_plantae_holc <- st_par(  sf_plantae
                                     , n_cores = 10
                                     , sf_func = st_join
                                     , join = st_within) |> 
-          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # ~75s w ~4M points and 10 cores
+          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # ~1m w ~4M points and 10 cores
 
 # 2x checks
 gbif_plantae_holc |> glimpse()
 gbif_plantae_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
 
-# write out
-gbif_plantae_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
-  cbind(., st_coordinates(.)) %>%
-  st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_holc_', Sys.Date(), '.fst'))
-
-# clean up
-rm(sf_plantae, gbif_plantae_holc); gc()
+# # write out
+# gbif_plantae_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
+#   cbind(., st_coordinates(.)) %>%
+#   st_set_geometry(NULL) |> 
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_plantae_holc_'
+#                         , Sys.Date(), '.fst'))
+# 
+# # clean up
+# rm(sf_plantae, gbif_plantae_holc); gc()
 
 ```
 
 ### iii aves by year
 ```{r eval=FALSE, include=FALSE}
 
+
+# create directory gbif points per biodiversity group spatially filtered to MSAs
+ifelse( !dir.exists('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/aves')
+       , dir.create('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/aves'), FALSE)
+
+
 (aves_files <- 
-    list.files('../biodiversity_in_a_concrete_jungle_data_too_big'
-               , pattern = 'gbif_aves_MSA' # MORE SPECIFIC THAN in script 03, because it HAS TO BE
+    list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/aves'
+               # , pattern = 'gbif_aves_MSA' # MORE SPECIFIC THAN in script 03, because it HAS TO BE
                , full.names = TRUE))
 
 
@@ -287,7 +299,7 @@ for(i in 1:length(aves_files)){
   
   # extract year, used for naming files when saving out later
   (year <- aves_files[i] |> 
-      str_remove('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_aves_MSA_') |> 
+      str_remove('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/aves/aves_MSA_') |> 
       str_sub(1, 4))
   
   # read in the annual bird data
@@ -310,7 +322,7 @@ for(i in 1:length(aves_files)){
   gbif_aves_holc %>%
     cbind(., st_coordinates(.)) %>%
     st_set_geometry(NULL) |>
-    fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_aves_holc_'
+    fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/aves/gbif_aves_holc_'
                           , year
                           , '_'
                           , Sys.Date(), '.fst'))
@@ -325,7 +337,7 @@ for(i in 1:length(aves_files)){
 ```{r eval=FALSE, include=FALSE}
 
 (sf_insecta <- # ~1.8 million records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_insecta_MSA_2023-01-01.fst') |>
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_insecta_MSA_2023-01-23.fst') |> 
    st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
  )
 
@@ -337,21 +349,22 @@ tic(); (gbif_insecta_holc <-
                  , n_cores = 10
                  , sf_func = st_join
                  , join = st_within) |> 
-          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # ~22s w ~1.8M points and 10 cores
+          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # ~20s w ~1.8M points and 10 cores
 
 # 2x checks
 gbif_insecta_holc |> glimpse()
 gbif_insecta_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
 
-# write out
-gbif_insecta_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
-  cbind(., st_coordinates(.)) %>%
-  st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_insecta_holc_', Sys.Date(), '.fst'))
-
-# clean up
-rm(sf_insecta, gbif_insecta_holc); gc()
+# # write out
+# gbif_insecta_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
+#   cbind(., st_coordinates(.)) %>%
+#   st_set_geometry(NULL) |> 
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_insecta_holc_'
+#                         , Sys.Date(), '.fst'))
+# 
+# # clean up
+# rm(sf_insecta, gbif_insecta_holc); gc()
 
 ```
 
@@ -359,7 +372,7 @@ rm(sf_insecta, gbif_insecta_holc); gc()
 ```{r eval=FALSE, include=FALSE}
 
 (sf_mammalia <- # ~225k records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_mammalia_MSA_2023-01-01.fst') |>
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_mammalia_MSA_2023-01-23.fst') |>
    st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
  )
 
@@ -378,21 +391,21 @@ gbif_mammalia_holc |> glimpse()
 gbif_mammalia_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
 
-# write out
-gbif_mammalia_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
-  cbind(., st_coordinates(.)) %>%
-  st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_mammalia_holc_', Sys.Date(), '.fst'))
-
-# clean up
-rm(sf_mammalia, gbif_mammalia_holc); gc()
+# # write out
+# gbif_mammalia_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
+#   cbind(., st_coordinates(.)) %>%
+#   st_set_geometry(NULL) |> 
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_mammalia_holc_', Sys.Date(), '.fst'))
+# 
+# # clean up
+# rm(sf_mammalia, gbif_mammalia_holc); gc()
 ```
 
 ### vi reptilia (aka Squamata!)
 ```{r}
 
 (sf_reptilia <- # 190k records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_reptilia_MSA_2023-01-02.fst') |>
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_reptilia_MSA_2023-01-23.fst') |> 
    st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
  )
 
@@ -404,28 +417,29 @@ tic(); (gbif_reptilia_holc <-
                  , n_cores = 10
                  , sf_func = st_join
                  , join = st_within) |> 
-          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # ~5s w ~190k points and 10 cores
+          mutate(holc_grade = ifelse(is.na(holc_grade), 'Not Graded', holc_grade))); toc() # ~2s w ~190k points and 10 cores
 
 # 2x checks
 gbif_reptilia_holc |> glimpse()
 gbif_reptilia_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
 
-# write out
-gbif_reptilia_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
-  cbind(., st_coordinates(.)) %>%
-  st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_reptilia_holc_', Sys.Date(), '.fst'))
-
-# clean up
-rm(sf_reptilia, gbif_reptilia_holc); gc()
+# # write out
+# gbif_reptilia_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
+#   cbind(., st_coordinates(.)) %>%
+#   st_set_geometry(NULL) |> 
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_reptilia_holc_'
+#                         , Sys.Date(), '.fst'))
+# 
+# # clean up
+# rm(sf_reptilia, gbif_reptilia_holc); gc()
 ```
 
 ### vii amphibia
 ```{r}
 
 (sf_amphibia <- # 130k records
-   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_amphibia_MSA_2023-01-01.fst') |>
+   read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA/gbif_amphibia_MSA_2023-01-23.fst') |> 
    st_as_sf(coords = c('X', 'Y'), crs = st_crs(4326))
  )
 
@@ -444,14 +458,15 @@ gbif_amphibia_holc |> glimpse()
 gbif_amphibia_holc |> st_drop_geometry() |> tabyl(holc_grade)
 
 
-# write out
-gbif_amphibia_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
-  cbind(., st_coordinates(.)) %>%
-  st_set_geometry(NULL) |> 
-  fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_amphibia_holc_', Sys.Date(), '.fst'))
-
-# clean up
-rm(sf_amphibia, gbif_amphibia_holc); gc()
+# # write out
+# gbif_amphibia_holc %>% # maybe use sfarrow? https://wcjochem.github.io/sfarrow/index.html
+#   cbind(., st_coordinates(.)) %>%
+#   st_set_geometry(NULL) |>
+#   fst::write_fst(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_amphibia_holc_'
+#                         , Sys.Date(), '.fst'))
+# 
+# # clean up
+# rm(sf_amphibia, gbif_amphibia_holc); gc()
 ```
 
 
