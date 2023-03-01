@@ -294,16 +294,20 @@ holc |> nrow() - test_holc_ua_int |> nrow() # woohoo no stradlers. Success.
 # # how many cross-boundary holc polygons do we have.
 # ua |> nrow() - test_ua_msa_int |> nrow() # ugh, ok so that's not great..
 # 
-# # how are UA and MSA related though - imperfectly?
-# test_ua_msa_int |>  st_collection_extract(., "POLYGON")
 # test_ua_msa_int |> 
-#   rownames_to_column() |> 
-#   select(rowname, ua_GEOID = GEOID, ua_name = NAME, msa_GEOID, msa_name) |> 
-#   st_drop_geometry() |> 
-#   as_tibble() |> 
-#   distinct(ua_GEOID, ua_name, msa_GEOID, msa_name) |> # sanity check
-#   arrange(ua_name, msa_name) |> # cosmetic
-#   write_csv('working_data/MSA_UA_lookup.csv')
+#   rename(ua_GEOID = GEOID, ua_name = NAME) |>            # for consistency
+#   st_write('../biodiversity_in_a_concrete_jungle_data_too_big/ua_msa_int.gpkg')
+
+
+# how are UA and MSA related though - imperfectly?
+(test_ua_msa_int <- 
+  st_read('../biodiversity_in_a_concrete_jungle_data_too_big/ua_msa_int.gpkg'))
+
+test_ua_msa_int |> nrow()
+test_ua_msa_int |> st_collection_extract("POLYGON") |> nrow()
+
+ua_msa_int |> distinct(ua_name)
+ua_msa_int |> distinct(msa_name)
 
 # urban area ids we are actually using
 (ua_ids <- 
@@ -312,25 +316,37 @@ holc |> nrow() - test_holc_ua_int |> nrow() # woohoo no stradlers. Success.
   tidylog::select(ua_GEOID = GEOID) |> 
   pull(ua_GEOID))
 
+# # find the most overlapping shard of a UA per MSA
+# test_ua_msa_int |> 
+#   filter(ua_GEOID %in% ua_ids) %>%                       # for sanity, reduce the problem
+#   mutate(int_area_km2 = as.double(st_area(.) / 1e+6)) |> # get overlapping area
+#   st_drop_geometry() |> 
+#   as_tibble() |> 
+#   group_by(ua_GEOID) |> 
+#   arrange(desc(int_area_km2)) |> # put largest overlap per group on top
+#   slice(1) |>                    # extract the 'most in' 
+#   ungroup() |> 
+#   distinct(ua_GEOID, ua_name, msa_GEOID, msa_name) |> # sanity check
+#   arrange(ua_name, msa_name) |> # cosmetic
+#   write_csv('working_data/MSA_UA_lookup.csv')
+
 (ua_msa_int <- read_csv('working_data/MSA_UA_lookup.csv') |> 
   filter(ua_GEOID %in% ua_ids))
 
-ua_msa_int |> distinct(ua_name)
-ua_msa_int |> distinct(msa_name)
 
-# so who splits?
-ua_msa_int |> distinct(ua_name, msa_name)
-ua_msa_int |> 
-  group_by(msa_name) |> add_count() |> arrange(desc(n), msa_name) |> tail()
-  # count() |> 
-  # arrange(desc(n)) #|> tail()
-
-# double checks
-ua_msa_int |> 
-  tabyl(ua_name, msa_name) |> 
-  tibble() |> 
-  pivot_longer(-ua_name) |> 
-  filter(value > 0)
+# # so who splits?
+# ua_msa_int |> distinct(ua_name, msa_name)
+# ua_msa_int |> 
+#   group_by(msa_name) |> add_count() |> arrange(desc(n), msa_name) |> tail()
+#   # count() |> 
+#   # arrange(desc(n)) #|> tail()
+# 
+# # double checks
+# ua_msa_int |> 
+#   tabyl(ua_name, msa_name) |> 
+#   tibble() |> 
+#   pivot_longer(-ua_name) |> 
+#   filter(value > 0)
 
 # just use UA's with HOLC and see how they visually overlay
 # extract ids
@@ -365,6 +381,9 @@ ifelse( !dir.exists(paste0(getwd(), '/working_data/UA'))
 
 rm(test_holc_ua_int, test_ua_msa_int)
 ```
+
+# msa_ungraded <- st_read('working_data/MSA_donut/msa_ungraded.gpkg') |> as_Spatial() # for KnowBPolygon
+#  ua_ungraded <- st_read('working_data/UA_donut/UA_ungraded_2023-01-23 16-05-42.gpkg') |> as_Spatial() # for KnowBPolygon
 
 
 ### ii read in urban areas with HOLC (skip?)

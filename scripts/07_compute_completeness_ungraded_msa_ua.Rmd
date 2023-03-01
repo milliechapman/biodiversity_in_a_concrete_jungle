@@ -281,7 +281,7 @@ Make data ready for KnowBPolygon via grouping and selecting
 
 # 2 run KnowBPolygon MSA
 ## A fungi - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 
 # work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
@@ -375,7 +375,7 @@ getwd()
 
 
 ## B fungi-family level - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 # work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
 (
@@ -469,8 +469,8 @@ getwd()
 ```
 
 
-## C plantae (memory blow out via plantae_not_graded_MSA.R) - needs to be updated with scripts above and below
-```{r eval=FALSE, include=FALSE}
+## C plantae - INCOMPLETE memory blow out
+```{r}
 
 
 # work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
@@ -513,7 +513,11 @@ getwd()
     pull(msa_GEOID)
   )
 
-i <- '41740' #'41860' # '19100' #'31080'
+# Millie - this makes it so you're just running the ones that are missing.
+# check the missing ones
+iterator[144:145] # yup
+(iterator <- iterator[144:145])
+
 tic(); for(i in iterator){
   # where are we
   msa_ungraded_tbl |> filter(msa_GEOID == i) |> print()
@@ -645,6 +649,9 @@ getwd()
   )
 
 
+# Millie - this makes it so you're just running the ones that are missing.
+(iterator <- iterator[1:4])
+
 # cut out largest 4 - too big!
 # (iterator <- iterator[5:145]) # cut out biggest too
 
@@ -701,7 +708,7 @@ getwd()
 
 
 ## E insecta - Done ~34hrs
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 
 # work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
@@ -794,7 +801,7 @@ getwd()
 
 
 ## F insecta - family - Done ~35 mins
-```{r}
+```{r eval=FALSE, include=FALSE}
 (
   insecta_not_holc <- # notice name
     read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_insecta_holc_2023-01-23.fst') |> 
@@ -886,7 +893,7 @@ getwd()
 
 
 ## G mammalia - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 
 # work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
@@ -979,7 +986,7 @@ getwd()
 
 
 ## H reptilia (aka Squamata!) - DONE
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 
 # work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
@@ -1072,7 +1079,7 @@ getwd()
 
 
 ## I amphibia - DONE
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 
 # work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
@@ -1168,7 +1175,7 @@ getwd()
 this is kind of like 03_filter_gbif_by_MSAs.Rmd but for UAs.. but at the time I (DHL) didn't realize 
 we might be interested in UAs.
 ## A fungi - Done ~25 mins
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 # create directory gbif points per biodiversity group spatially filtered to Urban Areas
 ifelse( !dir.exists('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/')
@@ -1193,7 +1200,7 @@ tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_download
 
 
 ## B plantea - Done ~ 2hr
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_plantae_2023-01-22.fst') |>
   mutate(taxon = 'Plantae', .before = 1) |> 
@@ -1212,8 +1219,8 @@ tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_download
 ```
 
 
-## C aves by year - crashed comp on last year. Ran last year alone successfully
-```{r}
+## C aves by year - DHL still to work on crashed comp on last year. Ran last year alone successfully
+```{r eval=FALSE, include=FALSE}
 # create directory gbif points per biodiversity group spatially filtered to UAs
 ifelse( !dir.exists('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/aves')
        , dir.create('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/aves'), FALSE)
@@ -1271,7 +1278,7 @@ for(i in 1:length(aves_files)){
 
 
 ## D insecta - Done ~23 mins
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_insecta_2023-01-22.fst') |>
   mutate(taxon = 'Insecta', .before = 1) |> 
@@ -1291,7 +1298,7 @@ tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_download
 
 
 ## E mammalia - Done ~4:15
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_mammalia_2023-01-22.fst') |>
   mutate(taxon = 'Mammalia', .before = 1) |> 
@@ -1311,7 +1318,7 @@ tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_download
 
 
 ## F reptilia (aka squamata) - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_reptilia_2023-01-22.fst') |>
   mutate(taxon = 'Reptilia', .before = 1) |> 
@@ -1331,7 +1338,7 @@ tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_download
 
 
 ## G amphibia - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads/download_amphibia_2023-01-22.fst') |>
   mutate(taxon = 'Amphibia', .before = 1) |> 
@@ -1509,7 +1516,7 @@ tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_download
 ```
 
 ## B fungi - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 # work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
 (
@@ -1602,7 +1609,7 @@ getwd()
 
 
 ## B fungi-family level - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 # work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
 (
@@ -1733,7 +1740,8 @@ getwd()
     pull(ua_GEOID)
   )
 
-(iterator <- iterator[3:146]) # cut out biggest too
+# (iterator <- iterator[3:146]) # cut out biggest too
+(iterator <- iterator[1:2]) # cut out biggest too
 
 tic(); for(i in iterator){
   # where are we
@@ -1870,6 +1878,8 @@ getwd()
 
 # cut out largest 63217, NYC
 # (iterator <- iterator[2:146]) # cut out biggest too
+iterator <- '63217'
+
 
 tic(); for(i in iterator){
   # where are we
@@ -1924,7 +1934,7 @@ getwd()
 
 
 ## E insecta - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 
 # work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
@@ -2013,7 +2023,7 @@ getwd()
 ```
 
 ## F insecta - family - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 
 # work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
@@ -2106,7 +2116,7 @@ getwd()
 ```
 
 ## G mammalia - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 
 # work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
@@ -2198,7 +2208,7 @@ getwd()
 ```
 
 ## H reptilia (aka Squamata!) - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 
 # work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
@@ -2290,7 +2300,7 @@ getwd()
 ```
 
 ## I amphibia  - Done
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 # work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
 (
