@@ -1219,7 +1219,7 @@ tic(); read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_download
 ```
 
 
-## C aves by year - DHL still need to work out.. haven't actually really started. SKIP FOR NOW!
+## C aves by year - done
 ```{r eval=FALSE, include=FALSE}
 # create directory gbif points per biodiversity group spatially filtered to UAs
 ifelse( !dir.exists('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/aves')

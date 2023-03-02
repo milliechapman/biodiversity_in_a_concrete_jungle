@@ -511,7 +511,32 @@ preds |>
 # completeness
 ```{r}
 
-comp |> filter(completeness > 80) |> tabyl(taxon, holc_grade)
+
+# get highly complete HOLC polygons
+tibble(  filename = list.files('working_data/completeness', full.names = TRUE, recursive = TRUE, pattern = 'Estimators.CSV')
+         , file_contents = map(filename, ~read_csv(., col_types = cols()))) |> 
+  mutate(taxon = str_remove(filename, 'working_data/completeness/') |> 
+           str_remove('/Estimators.CSV') |> 
+           str_remove('_only') |> 
+           str_remove('_graded')) |> 
+  select(taxon, file_contents) |> 
+  separate(taxon, into = c('taxon', 'level')) |> 
+  mutate(level = ifelse(is.na(level), 'species', level)) |> 
+  unnest(file_contents) |> 
+  right_join(holc, by = c('Area' = 'id')) |> 
+  # NA to zero on completeness
+  mutate(density = Records / area_holc_km2) |>  
+  left_join(read_csv('working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv', col_types = 'cc') # makes type = character
+            , by = c('Area' = 'id')
+  ) |> 
+  left_join(read_csv('working_data/MSA_UA_lookup.csv') |> 
+              mutate(msa_GEOID = as.character(msa_GEOID)) |> 
+              select(msa_GEOID, ua_GEOID)
+            , by = 'msa_GEOID') |> 
+  select(id = Area, completeness = Completeness, taxon) |> 
+  filter(completeness > 80) |> 
+  write_csv(paste0('working_data/highly_complete_holcs/highly_complete_holcs_', Sys.Date(), '.csv'))
+
 
 
 comp |> 
