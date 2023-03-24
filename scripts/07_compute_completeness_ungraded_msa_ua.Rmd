@@ -472,11 +472,14 @@ getwd()
 ## C plantae - INCOMPLETE memory blow out
 ```{r}
 
+library(usethis)
+usethis::edit_r_environ()
+# Then you paste in “R_MAX_VSIZE=28Gb” without the quotes
 
 # work only with data NOT intersecting HOLC polygons per MSA (aka the non-graded areas)
 (
   plantae_not_holc <- # notice name
-  read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/gbif_plantae_holc_2023-01-23.fst') |> 
+  read_fst('biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantae_holc_2023-01-23.fst') |> 
   filter(holc_grade == 'Not Graded') |>                   # NOT GRADED
   select(species, n_obs, X, Y, msa_GEOID) |>              # ID cut, msa_GEOID added
   filter(!is.na(species)) |> 
@@ -1705,7 +1708,7 @@ getwd()
 # work only with data NOT intersecting HOLC polygons per Uraban area (aka the non-graded areas)
 (
   plantae_not_holc <- # notice name
-  read_fst('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/gbif_plantea_UA_donut_2023-01-29.fst') |> 
+  read_fst('biodiversity_in_a_concrete_jungle_data_too_big/gbif_plantea_UA_donut_2023-01-29.fst') |> 
   select(species, n_obs, X, Y, ua_GEOID) |>              # ID cut, ua_GEOID added
   filter(!is.na(species)) |> 
   group_by(species, X, Y, ua_GEOID) |> 
@@ -1798,11 +1801,11 @@ getwd()
 ```{r eval=FALSE, include=FALSE}
 
 
-list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/aves')
+list.files('../biodiversity_in_a_concrete_jungle_data_too_big/aves')
 
 
 (aves_files <- 
-    list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_UA/aves'
+    list.files('../biodiversity_in_a_concrete_jungle_data_too_big/aves'
                , recursive = TRUE
                , full.names = TRUE))
 
