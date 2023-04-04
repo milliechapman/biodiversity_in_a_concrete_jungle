@@ -96,6 +96,7 @@ getwd()
     select(id, holc_grade, area_holc_km2) |> 
     st_drop_geometry())
 
+holc |> dim()
 # list.files('_students/Diego/biodiversity_in_a_concrete_jungle/working_data/')
 
 list.files()
@@ -122,12 +123,13 @@ holc_comp <-
               mutate(msa_GEOID = as.character(msa_GEOID)) |> 
               select(msa_GEOID, ua_GEOID)
             , by = 'msa_GEOID') |> 
-  select(density, completeness = Completeness, pred_richness = Richness, holc_grade, taxon, level, ua_GEOID, msa_GEOID) # cosmetic reorder
+  select(id = Area, density, completeness = Completeness, pred_richness = Richness, holc_grade, taxon, level, ua_GEOID, msa_GEOID) # cosmetic reorder
 # interaction(grade, family?)
 
 # TODO figure out why so many nas - because Right join, should those be zeros?
 holc_comp |> filter(is.na(taxon))
 holc_comp |> glimpse()
+holc_comp |> group_by(id) |> count()
 
 # MSA completeness and sampling density
 msa_comp <-
@@ -157,6 +159,8 @@ msa_comp <-
 
 msa_comp
 msa_comp |> glimpse()
+msa_comp |> group_by(msa_GEOID) |> count()
+msa_comp |> group_by(ua_GEOID) |> count()
 
 
 # UA completeness and sampling density
@@ -187,11 +191,14 @@ ua_comp <-
 
 ua_comp
 ua_comp |> glimpse()
+ua_comp |> group_by(msa_GEOID) |> count()
+ua_comp |> group_by(ua_GEOID) |> count()
+
 
 # mutate(holc_grade = factor(holc_grade, levels = c('A', 'B', 'C', 'D', 'UA', 'MSA')))
 
 comp <- 
-  bind_rows(holc_comp, msa_comp, ua_comp) |> 
+  bind_rows(holc_comp |> select(-id), msa_comp, ua_comp) |> 
   drop_na(taxon) |> 
   mutate(grade = factor(ifelse(level == 'species', holc_grade, paste0(holc_grade, ': family')),
          levels = c(  "A",  "A: family"
@@ -206,7 +213,7 @@ comp
 comp |> View()
 comp |> tabyl(holc_grade)
 comp |> tabyl(holc_grade, taxon)
-comp |> tabyl(holc_grade, taxon, level) |> bind_rows(.id = 'level') |> tibble()
+comp |> tabyl(holc_grade, taxon, level) |> bind_rows(.id = 'level') |> tibble() # HANDSOME TABLE!
 
 
 # comp |> 
@@ -537,10 +544,15 @@ preds |>
 #   filter(completeness > 80) |> 
 #   write_csv(paste0('working_data/highly_complete_holcs/highly_complete_holcs_', Sys.Date(), '.csv'))
 
-highly_complete <- read_csv('working_data/highly_complete_holcs/highly_complete_holcs_2023-03-02.csv')
+read_csv('working_data/highly_complete_holcs/highly_complete_holcs_2023-04-04.csv') |>
+  ggplot(aes(completeness)) + geom_density()
+
+# highly_complete <- read_csv('working_data/highly_complete_holcs/highly_complete_holcs_2023-03-02.csv')
+
 (highly_complete_aves <-
-  read_csv('working_data/highly_complete_holcs/highly_complete_holcs_2023-03-02.csv') |> 
-  filter(taxon == 'aves')) # ~10% of all HOLC polygons
+  # read_csv('working_data/highly_complete_holcs/highly_complete_holcs_2023-03-02.csv') |> 
+    read_csv('working_data/highly_complete_holcs/highly_complete_holcs_2023-04-04.csv') |> 
+    filter(taxon == 'aves')) # ~10% of all HOLC polygons
   
 
 (aves_files <- 
@@ -584,10 +596,14 @@ tic(); for(i in 1:length(aves_files)){
               select(id, everything())
       )
     }
-  }; toc(); beepr::beep() # ~1min
+  }; toc(); beepr::beep() # ~30 seconds
 
 
-aves_holc
+aves_holc_highly_complete |> 
+  arrange(id) |> 
+  write_csv(paste0('working_data/highly_complete_holcs_aves_species_lists/highly_complete_holcs_aves_species_lists_', Sys.Date(), '.csv'))
+
+
 
 
 
