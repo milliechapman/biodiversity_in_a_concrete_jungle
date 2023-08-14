@@ -358,7 +358,37 @@ comp |>
   NULL
 
 
-preds <- 
+# # TODO add HOLC as random SLOPE and see which is best
+# preds <- 
+#   comp |> 
+#   # replace_na(list(completeness = 0)) |> 
+#   group_by(taxon, level) |> 
+#   nest() |> 
+#   # mutate(data        = map(data,  ~drop_na(.x))
+#   mutate(#  models_density = map(data, ~lm(density ~ holc_grade, .x))
+#          #, models_compl = map(data, ~lm(completeness ~ holc_grade, .x))
+#            models_density_msa = map(data, ~lme4::lmer(density ~ holc_grade + (1 | msa_GEOID), .x))
+#          , models_compl_msa   = map(data, ~lme4::lmer(completeness ~ holc_grade + (1 | msa_GEOID), .x))
+#          , models_rich_msa    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (1 | msa_GEOID), .x))
+#          
+#          , models_density_ua = map(data, ~lme4::lmer(density ~ holc_grade + (1 | ua_GEOID), .x))
+#          , models_compl_ua   = map(data, ~lme4::lmer(completeness ~ holc_grade + (1 | ua_GEOID), .x))
+#          , models_rich_ua    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (1 | ua_GEOID), .x))
+#          
+#          , ggpreds_density_msa = map(models_density_msa, ggeffects::ggpredict)
+#          , ggpreds_compl_msa   = map(models_compl_msa, ggeffects::ggpredict)
+#          , ggpreds_rich_msa    = map(models_rich_msa, ggeffects::ggpredict)
+#          
+#          , ggpreds_density_ua = map(models_density_ua, ggeffects::ggpredict)
+#          , ggpreds_compl_ua   = map(models_compl_ua, ggeffects::ggpredict)
+#          , ggpreds_rich_ua    = map(models_rich_ua, ggeffects::ggpredict)
+#          )
+# 
+# preds |> glimpse()
+
+
+# TODO add HOLC as random SLOPE and see which is best: small sample size taxon.. eh
+tic(); preds <- 
   comp |> 
   # replace_na(list(completeness = 0)) |> 
   group_by(taxon, level) |> 
@@ -374,6 +404,15 @@ preds <-
          , models_compl_ua   = map(data, ~lme4::lmer(completeness ~ holc_grade + (1 | ua_GEOID), .x))
          , models_rich_ua    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (1 | ua_GEOID), .x))
          
+         # random slope
+         # , models_density_msa_rs = map(data, ~lme4::lmer(density ~ holc_grade + (holc_grade | msa_GEOID), .x))
+         # , models_compl_msa_rs   = map(data, ~lme4::lmer(completeness ~ holc_grade + (holc_grade | msa_GEOID), .x))
+         # , models_rich_msa_rs    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (holc_grade | msa_GEOID), .x))
+         
+         # , models_density_ua_rs = map(data, ~lme4::lmer(density ~ holc_grade + (holc_grade | ua_GEOID), .x))
+         # , models_compl_ua_rs   = map(data, ~lme4::lmer(completeness ~ holc_grade + (holc_grade | ua_GEOID), .x))
+         # , models_rich_ua_rs    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (holc_grade | ua_GEOID), .x))
+         
          , ggpreds_density_msa = map(models_density_msa, ggeffects::ggpredict)
          , ggpreds_compl_msa   = map(models_compl_msa, ggeffects::ggpredict)
          , ggpreds_rich_msa    = map(models_rich_msa, ggeffects::ggpredict)
@@ -381,9 +420,27 @@ preds <-
          , ggpreds_density_ua = map(models_density_ua, ggeffects::ggpredict)
          , ggpreds_compl_ua   = map(models_compl_ua, ggeffects::ggpredict)
          , ggpreds_rich_ua    = map(models_rich_ua, ggeffects::ggpredict)
-         )
+         
+         # random slope
+         # , ggpreds_density_msa_rs = map(models_density_msa_rs, ggeffects::ggpredict)
+         # , ggpreds_compl_msa_rs   = map(models_compl_msa_rs, ggeffects::ggpredict)
+         # , ggpreds_rich_msa_rs    = map(models_rich_msa_rs, ggeffects::ggpredict)
+         # 
+         # , ggpreds_density_ua_rs = map(models_density_ua_rs, ggeffects::ggpredict)
+         # , ggpreds_compl_ua_rs   = map(models_compl_ua_rs, ggeffects::ggpredict)
+         # , ggpreds_rich_ua_rs    = map(models_rich_ua_rs, ggeffects::ggpredict)
+         
+         ); toc() # < 10 seconds
 
 preds |> glimpse()
+
+# which fit is better, UA or MSA
+preds |> 
+  select(taxon, level, starts_with('models')) |> 
+  pivot_longer(cols = !c(taxon, level)) |> 
+  mutate(AIC = map(value, AIC)) |> 
+  unnest(AIC) |> 
+  arrange(taxon, level, desc(AIC))
 
 preds |>
   select(taxon, level, ggpreds_density_msa) |> 
@@ -507,11 +564,6 @@ preds |>
   NULL
 
 
-  
-
-
-
-
 ```
 
 
@@ -572,39 +624,40 @@ read_csv('working_data/highly_complete_holcs/highly_complete_holcs_2023-04-04.cs
 # aves_holc |> dim() # 51,591,321 records!
 
 
-# sloppy but works (all of the columns, growing a vector [ewwey])
-tic(); for(i in 1:length(aves_files)){
-  print(i)
-  if(i == 1){
-    
-    aves_holc_highly_complete <- 
-      read_fst(aves_files[i]) |> 
-      tibble() |> 
-      filter(id %in% highly_complete_aves$id) |> 
-      distinct(id, taxon, family, genus, species) |> 
-      select(id, everything())
-    
-    }
-  else{
-    
-    aves_holc_highly_complete <- 
-      rbind(aves_holc_highly_complete
-            , read_fst(aves_files[i]) |> 
-              tibble() |> 
-              filter(id %in% highly_complete_aves$id) |> 
-              distinct(id, taxon, family, genus, species) |> 
-              select(id, everything())
-      )
-    }
-  }; toc(); beepr::beep() # ~30 seconds
+# # sloppy but works (all of the columns, growing a vector [ewwey])
+# tic(); for(i in 1:length(aves_files)){
+#   print(i)
+#   if(i == 1){
+#     
+#     aves_holc_highly_complete <- 
+#       read_fst(aves_files[i]) |> 
+#       tibble() |> 
+#       filter(id %in% highly_complete_aves$id) |> 
+#       distinct(id, taxon, family, genus, species) |> 
+#       select(id, everything())
+#     
+#     }
+#   else{
+#     
+#     aves_holc_highly_complete <- 
+#       rbind(aves_holc_highly_complete
+#             , read_fst(aves_files[i]) |> 
+#               tibble() |> 
+#               filter(id %in% highly_complete_aves$id) |> 
+#               distinct(id, taxon, family, genus, species) |> 
+#               select(id, everything())
+#       )
+#     }
+#   }; toc(); beepr::beep() # ~30 seconds
+# 
+# 
+# aves_holc_highly_complete |> 
+#   arrange(id) |> 
+#   write_csv(paste0('working_data/highly_complete_holcs_aves_species_lists/highly_complete_holcs_aves_species_lists_', Sys.Date(), '.csv'))
 
 
-aves_holc_highly_complete |> 
-  arrange(id) |> 
-  write_csv(paste0('working_data/highly_complete_holcs_aves_species_lists/highly_complete_holcs_aves_species_lists_', Sys.Date(), '.csv'))
-
-
-
+aves_holc_highly_complete <-
+  read_csv('working_data/highly_complete_holcs_aves_species_lists/highly_complete_holcs_aves_species_lists_2023-04-04.csv')
 
 
 comp |> 
@@ -620,8 +673,9 @@ comp |>
   dplyr::filter(n > 1L) 
   
 
-
-tibble(  filename = list.files('working_data/completeness', full.names = TRUE, recursive = TRUE, pattern = 'Estimators.CSV')
+# correlations for completeness by taxon
+corrs_completeness_taxon <-
+  tibble(  filename = list.files('working_data/completeness', full.names = TRUE, recursive = TRUE, pattern = 'Estimators.CSV')
          , file_contents = map(filename, ~read_csv(., col_types = cols()))) |> 
   mutate(taxon = str_remove(filename, 'working_data/completeness/') |> 
            str_remove('/Estimators.CSV') |> 
@@ -641,17 +695,32 @@ tibble(  filename = list.files('working_data/completeness', full.names = TRUE, r
               mutate(msa_GEOID = as.character(msa_GEOID)) |> 
               select(msa_GEOID, ua_GEOID)
             , by = 'msa_GEOID') |> 
-  select(id = Area, completeness = Completeness, taxon) |> 
+  select(id = Area, completeness = Completeness, taxon, level) |> 
+  unite('taxon', taxon, level, sep = '_') |> 
   drop_na(completeness) |> 
   pivot_wider(id, names_from = taxon, values_from = completeness, values_fn = mean) |> 
-  select(-id) |> 
+  select(-id) |> # %$% Hmisc::rcorr() # TODO ADD CONF.INT?
   cor(use = 'pairwise.complete.obs') |> 
-  round(2) # life histories?
+  round(2) |> # life histories?
+  data.frame() |> 
+  rownames_to_column() |> 
+  pivot_longer(-rowname) |> 
+  filter(rowname != name)
 
-
-
-
-
+corrs_completeness_taxon |> 
+  arrange(desc(value)) |> 
+  filter(row_number() %% 2 != 0) # deletes even numbered rows
+  
+corrs_completeness_taxon |> 
+  arrange(desc(value)) |> 
+  filter(row_number() %% 2 != 0) |> # deletes even numbered rows
+  unite('species_pair', rowname, name) |> 
+  ggplot(aes(value, reorder(species_pair, value))) +
+  geom_vline(xintercept = 0) +
+  geom_point() +
+  theme_bw(16) +
+  NULL
+  
 ```
 
 
@@ -660,7 +729,6 @@ tibble(  filename = list.files('working_data/completeness', full.names = TRUE, r
 
 list.files('completeness_MSA')
 list.files(full.names = TRUE, recursive = TRUE)
-
 
 
 
