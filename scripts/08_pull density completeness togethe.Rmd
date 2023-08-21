@@ -7,6 +7,9 @@ editor_options:
   chunk_output_type: console
 ---
 
+
+TODO add climate (precip and temp)?
+
 TODO send files that did not complete runing the completness
 
 look at plant query
@@ -86,7 +89,6 @@ mapviewOptions(fgb = FALSE)
 # read in data
 
 ```{r}
-
 # setwd('_students/Diego/biodiversity_in_a_concrete_jungle/working_data/')
 getwd()
 
@@ -214,8 +216,10 @@ comp |> View()
 comp |> tabyl(holc_grade)
 comp |> tabyl(holc_grade, taxon)
 comp |> tabyl(holc_grade, taxon, level) |> bind_rows(.id = 'level') |> tibble() # HANDSOME TABLE!
+```
 
-
+# viz boxplots
+```{r}
 # comp |> 
 # # holc_comp |> 
 #   drop_na(taxon) |> 
@@ -565,6 +569,85 @@ preds |>
 
 
 ```
+
+# viz: half eye and rain cloud TODO: add stat sig?
+```{r}
+
+# https://cran.r-project.org/web/packages/ggdist/vignettes/slabinterval.html # best of three
+# https://cran.r-project.org/web/packages/gghalves/vignettes/gghalves.html
+# https://rpubs.com/rana2hin/raincloud
+
+# 
+# comp |> 
+#   drop_na(taxon) |> 
+#   # mutate(level = ifelse(level == 'species', ' ', level))|>
+#   mutate(level = ifelse(level == 'species', ' ', 'family: ')) |>
+#   ggplot(aes(interaction(level, holc_grade, sep = ''), density, fill = holc_grade
+#              # , color = level
+#          )) + 
+#   geom_boxplot() +
+#   theme_bw(16) + 
+#   scale_fill_manual(values = holc_pal_f) +
+#   scale_y_log10() +
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = c(.85, .25)) +
+#   # scale_y_sqrt() +
+#   # facet_wrap(~interaction(taxon, level)) +
+#   labs(title = 'sampling density') + 
+#   facet_wrap(~taxon, scales = 'free', nrow = 2) +
+#   NULL
+
+comp |> 
+  drop_na(taxon) |> 
+   mutate(grade = factor(ifelse(level == 'species', holc_grade, paste0(holc_grade, ': family')),
+         levels = c(  "A",  "A: family"
+                    , "B",  "B: family"
+                    , "C",  "C: family"
+                    , "D",  "D: family"
+                    , "UA", "UA: family"
+                    , "MSA","MSA: family"), ordered = TRUE)
+         , `HOLC Grade` = factor(holc_grade
+                               , levels = c(LETTERS[1:4], 'UA', 'MSA'))
+         ) |>
+  # filter(taxon == 'aves') |>
+  ggplot(aes(grade, density, fill = `HOLC Grade` # holc_grade
+             # , color = level
+         )) + 
+  ggdist::stat_halfeye(
+    # adjust bandwidth
+    adjust = 0.5,
+    # move to the right
+    justification = -0.2,
+    # remove the slub interval
+    .width = 0,
+    point_colour = NA
+  ) + 
+  geom_boxplot(
+    width = 0.12,
+    # removing outliers
+    outlier.color = NA,
+    # alpha = 0.5
+  ) +
+  #  ggdist::stat_dots(
+  #   # ploting on left side
+  #   side = "left",
+  #   # adjusting position
+  #   justification = 1.1,
+  #   # adjust grouping (binning) of observations
+  #   binwidth = 0.25
+  # ) + 
+  scale_y_log10(labels = scales::label_log(digits = 2)) +
+  # scale_y_sqrt() +
+  scale_fill_manual(values = holc_pal_f) + 
+  facet_wrap(~taxon, scales = 'free', nrow = 2) +
+  theme_bw(16) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = c(.85, .25)) +
+  # labs(title = 'sampling density') + 
+  labs(x = '', y = 'Sampling Density') +
+  annotation_logticks(sides = 'l') +
+  NULL
+
+```
+
 
 
 # completeness
