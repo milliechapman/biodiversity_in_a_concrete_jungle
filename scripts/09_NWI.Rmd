@@ -18,7 +18,6 @@ https://www.fws.gov/program/national-wetlands-inventory/download-state-wetlands-
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
 # 0 set up: load libraries, custom functions, set defaults
 ```{r}
 
