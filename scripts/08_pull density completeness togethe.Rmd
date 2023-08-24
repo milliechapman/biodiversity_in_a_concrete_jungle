@@ -7,29 +7,35 @@ editor_options:
   chunk_output_type: console
 ---
 
+PNAS, Ecology Letters.
 
-TODO add climate (precip and temp)?
+Millie, to redo NDVI per HOLC polygons.
 
-TODO send files that did not complete runing the completness
-
-look at plant query
-
-
-<!-- what about a total? run again without taxon breaks - going to blow out RAM -->
-
-
-<!-- split by source! educational opportunities via iNat-->
-
-<!-- double check plant downloads, lots of data? -->
-
-<!-- high completeness, filter and drill down into ? ONLY Look at richness when completeness is high -->
-
+do boxplots with significance per taxon.
+  or via nesting.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+<!-- To retrieve a single file from an old commit to your working copy, simply use: -->
 
+<!-- $ git checkout [revision_hash] [file_name] -->
+
+<!-- You can use the HEAD pointer as the [revision_hash] if you want to: -->
+
+<!--     HEAD - Points to the Last Commit on the current repository; -->
+
+<!--     HEAD^ - Last Commit - 1; -->
+
+<!--     HEAD^^ - Last Commit - 2; -->
+
+<!--     HEAD~10 - 10 commits behind of HEAD; -->
+
+<!--     Git checkout HEAD~1 filename -->
+
+
+    
 # 0 set up: load libraries, custom functions, set defaults
 ```{r}
 
@@ -83,6 +89,61 @@ holc_pal_f<- c('#92BC6B' # green
 # fixes mapview
 mapviewOptions(fgb = FALSE)
 ```
+
+
+
+
+# NDVI
+```{r}
+
+# read through each of the geography-specific files, group_by. and create mean.
+
+
+
+# 
+# 
+# # list.files('working_data/MSA')
+# # msa   <- st_read('working_data/MSA/msa_as_geopackage_2022-12-08 15-40-07.gpkg')
+# # msa_u <- st_read('working_data/MSA_donut/msa_ungraded.gpkg')
+# 
+# list.files('working_data/ndvi')
+# list.files('working_data')
+# 
+# ndvi <- read_csv('working_data/mean_ndvi.csv')
+# 
+# # MSA: we tried to make ndvi character, then we tried make msa numeric.
+# msa |> 
+#   mutate(GEOID = as.numeric(msa_GEOID)) |> 
+#   left_join(
+#     ndvi |>
+#       filter(area == 'msa') #|> 
+#       # mutate(msa_GEOID = as.character(GEOID))
+#       , by = c('GEOID')
+#     ) |> 
+#   filter(!is.na(mean_ndvi)) # none matched
+# 
+# 
+# # M
+# msa |> 
+#   left_join(
+#     ndvi |>
+#       filter(area == 'msa') |> 
+#       mutate(msa_GEOID = as.character(GEOID))
+#       , by = c('msa_GEOID'))
+# 
+# 
+# 
+# # test_ndvi <- read_csv("working_data/ndvi/modis250_ndvi_msa_2018.csv")
+# test_ndvi <- read_csv("working_data/ndvi/modis250_ndvi_")
+# 
+# msa |> 
+#   mutate(msa_GEOID = as.double(msa_GEOID)) |> 
+#   left_join(test_ndvi, by = c('msa_GEOID' = 'm_GEOID'))
+
+
+
+```
+
 
 
 
@@ -216,402 +277,25 @@ comp |> View()
 comp |> tabyl(holc_grade)
 comp |> tabyl(holc_grade, taxon)
 comp |> tabyl(holc_grade, taxon, level) |> bind_rows(.id = 'level') |> tibble() # HANDSOME TABLE!
-```
-
-# viz boxplots
-```{r}
-# comp |> 
-# # holc_comp |> 
-#   drop_na(taxon) |> 
-#   # ggplot(aes(holc_grade, density, fill = holc_grade)) +
-#   ggplot(aes(grade, density, fill = grade)) +
-#   geom_boxplot() +
-#   scale_fill_manual(values = rep(holc_pal_f, 2)) + 
-#   scale_y_log10() + 
-#   theme_bw(16) + 
-#   theme(axis.text.x = element_text(angle = 90)) + 
-#   # facet_grid(level~taxon) +
-#   # facet_grid(~taxon) +
-#   facet_wrap(~taxon, scales = 'free') +
-#   NULL
-
-# THIS IS THE ONE
-comp |> 
-  drop_na(taxon) |> 
-  # mutate(level = ifelse(level == 'species', ' ', level))|>
-  mutate(level = ifelse(level == 'species', ' ', 'family: ')) |>
-  ggplot(aes(interaction(level, holc_grade, sep = ''), density, fill = holc_grade
-             # , color = level
-         )) + 
-  geom_boxplot() +
-  theme_bw(16) + 
-  scale_fill_manual(values = holc_pal_f) +
-  scale_y_log10() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = c(.85, .25)) +
-  # scale_y_sqrt() +
-  # facet_wrap(~interaction(taxon, level)) +
-  labs(title = 'sampling density') + 
-  facet_wrap(~taxon, scales = 'free', nrow = 2) +
-  NULL
-
-# COMPLETENESS
-comp |> 
-  drop_na(taxon) |> 
-  # replace_na(list(completeness = 0)) |>
-  # mutate(level = ifelse(level == 'species', ' ', level))|>
-  mutate(level = ifelse(level == 'species', ' ', 'family: '))|> 
-  ggplot(aes(interaction(level, holc_grade, sep = ''), completeness, fill = holc_grade
-             # , color = level
-         )) + 
-  geom_boxplot() +
-  theme_bw(16) + 
-  scale_fill_manual(values = holc_pal_f) +
-  scale_y_log10() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = c(.85, .25)) +
-  # scale_y_sqrt() +
-  # facet_wrap(~interaction(taxon, level)) +
-  labs(title = 'estimated completeness') + 
-  facet_wrap(~taxon, scales = 'free', nrow = 2) +
-  NULL
-
-
-# RICHNESS
-comp |> 
-  drop_na(taxon) |> 
-  # replace_na(list(completeness = 0)) |>
-  # mutate(level = ifelse(level == 'species', ' ', level))|>
-  mutate(level = ifelse(level == 'species', ' ', 'family: '))|> 
-  ggplot(aes(interaction(level, holc_grade, sep = ''), pred_richness, fill = holc_grade
-             # , color = level
-         )) + 
-  geom_boxplot() +
-  theme_bw(16) + 
-  scale_fill_manual(values = holc_pal_f) +
-  scale_y_log10() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = c(.85, .25)) +
-  # scale_y_sqrt() +
-  # facet_wrap(~interaction(taxon, level)) +
-  labs(title = 'estimated RICHNESS') + 
-  facet_wrap(~taxon, scales = 'free', nrow = 2) +
-  NULL
 
 
 
-
-# # need to get city/UA/MSA as random effect in there.. other covariates?
-# comp |>
-#   lm(formula = density ~ holc_grade*taxon + level) |> # sjPlot::plot_model(sort.est = TRUE)
-#   broom::tidy(conf.int = TRUE) |> 
-#   # ggplot(aes(estimate, term)) +
-#   ggplot(aes(estimate, reorder(term, estimate))) +
-#   geom_vline(xintercept = 0, color = 'dark gray') +
-#   geom_point() + 
-#   geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
-#   labs(title = 'sampling density'
-#        , subtitle = 'it is all about the birds') + 
-#   theme_bw() + 
-#   NULL
-
-
-# need to get city/UA/MSA as random effect in there.. other covariates?
 comp |>
-  lme4::lmer(formula = density ~ holc_grade*taxon + level + (1 | msa_GEOID)) |> # sjPlot::plot_model(sort.est = TRUE)
-  broom.mixed::tidy(conf.int = TRUE) |> # tabyl(effect)
-  filter(effect == 'fixed') |> 
-  ggplot(aes(estimate, reorder(term, estimate))) +
-  geom_vline(xintercept = 0, color = 'dark gray') +
-  geom_point() + 
-  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
-  labs(title = 'sampling density AS MIXED model'
-       , subtitle = 'it is all about the birds') + 
-  theme_bw() + 
-  NULL
-
-# need to get city/UA/MSA as random effect in there.. other covariates?
-comp |>
-  drop_na(completeness) |> 
-  # lm(formula = completeness ~ holc_grade*taxon + level) |> #sjPlot::plot_model(sort.est = TRUE)
-  lme4::lmer(formula = completeness ~ holc_grade*taxon + level + (1 | msa_GEOID)) |> # sjPlot::plot_model(sort.est = TRUE)
-  broom.mixed::tidy(conf.int = TRUE) |> # tabyl(effect)
-  filter(effect == 'fixed') |> 
-  ggplot(aes(estimate, reorder(term, estimate))) +
-  geom_vline(xintercept = 0, color = 'dark gray') +
-  geom_point() + 
-  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
-  labs(title = 'Completeness'
-       , subtitle = 'Whats the story here?') + 
-  theme_bw() + 
-  NULL
-
-
-# completeness with NAs as zeros
-comp |> 
-  replace_na(list(completeness = 0)) |> 
-  # lm(formula = completeness ~ holc_grade*taxon + level) |> #sjPlot::plot_model(sort.est = TRUE)
-  # broom::tidy(conf.int = TRUE) |> 
-  lme4::lmer(formula = completeness ~ holc_grade*taxon + level + (1 | msa_GEOID)) |> # sjPlot::plot_model(sort.est = TRUE)
-  broom.mixed::tidy(conf.int = TRUE) |> # tabyl(effect)
-  filter(effect == 'fixed') |> 
-  ggplot(aes(estimate, reorder(term, estimate))) +
-  geom_vline(xintercept = 0, color = 'dark gray') +
-  geom_point() + 
-  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
-  labs(title = 'Completeness - with NA changed to ZERO'
-       , subtitle = 'Whats the story here?') + 
-  theme_bw() + 
-  NULL
-
-
-# # TODO add HOLC as random SLOPE and see which is best
-# preds <- 
-#   comp |> 
-#   # replace_na(list(completeness = 0)) |> 
-#   group_by(taxon, level) |> 
-#   nest() |> 
-#   # mutate(data        = map(data,  ~drop_na(.x))
-#   mutate(#  models_density = map(data, ~lm(density ~ holc_grade, .x))
-#          #, models_compl = map(data, ~lm(completeness ~ holc_grade, .x))
-#            models_density_msa = map(data, ~lme4::lmer(density ~ holc_grade + (1 | msa_GEOID), .x))
-#          , models_compl_msa   = map(data, ~lme4::lmer(completeness ~ holc_grade + (1 | msa_GEOID), .x))
-#          , models_rich_msa    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (1 | msa_GEOID), .x))
-#          
-#          , models_density_ua = map(data, ~lme4::lmer(density ~ holc_grade + (1 | ua_GEOID), .x))
-#          , models_compl_ua   = map(data, ~lme4::lmer(completeness ~ holc_grade + (1 | ua_GEOID), .x))
-#          , models_rich_ua    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (1 | ua_GEOID), .x))
-#          
-#          , ggpreds_density_msa = map(models_density_msa, ggeffects::ggpredict)
-#          , ggpreds_compl_msa   = map(models_compl_msa, ggeffects::ggpredict)
-#          , ggpreds_rich_msa    = map(models_rich_msa, ggeffects::ggpredict)
-#          
-#          , ggpreds_density_ua = map(models_density_ua, ggeffects::ggpredict)
-#          , ggpreds_compl_ua   = map(models_compl_ua, ggeffects::ggpredict)
-#          , ggpreds_rich_ua    = map(models_rich_ua, ggeffects::ggpredict)
-#          )
-# 
-# preds |> glimpse()
-
-
-# TODO add HOLC as random SLOPE and see which is best: small sample size taxon.. eh
-tic(); preds <- 
-  comp |> 
-  # replace_na(list(completeness = 0)) |> 
-  group_by(taxon, level) |> 
-  nest() |> 
-  # mutate(data        = map(data,  ~drop_na(.x))
-  mutate(#  models_density = map(data, ~lm(density ~ holc_grade, .x))
-         #, models_compl = map(data, ~lm(completeness ~ holc_grade, .x))
-           models_density_msa = map(data, ~lme4::lmer(density ~ holc_grade + (1 | msa_GEOID), .x))
-         , models_compl_msa   = map(data, ~lme4::lmer(completeness ~ holc_grade + (1 | msa_GEOID), .x))
-         , models_rich_msa    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (1 | msa_GEOID), .x))
-         
-         , models_density_ua = map(data, ~lme4::lmer(density ~ holc_grade + (1 | ua_GEOID), .x))
-         , models_compl_ua   = map(data, ~lme4::lmer(completeness ~ holc_grade + (1 | ua_GEOID), .x))
-         , models_rich_ua    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (1 | ua_GEOID), .x))
-         
-         # random slope
-         # , models_density_msa_rs = map(data, ~lme4::lmer(density ~ holc_grade + (holc_grade | msa_GEOID), .x))
-         # , models_compl_msa_rs   = map(data, ~lme4::lmer(completeness ~ holc_grade + (holc_grade | msa_GEOID), .x))
-         # , models_rich_msa_rs    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (holc_grade | msa_GEOID), .x))
-         
-         # , models_density_ua_rs = map(data, ~lme4::lmer(density ~ holc_grade + (holc_grade | ua_GEOID), .x))
-         # , models_compl_ua_rs   = map(data, ~lme4::lmer(completeness ~ holc_grade + (holc_grade | ua_GEOID), .x))
-         # , models_rich_ua_rs    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (holc_grade | ua_GEOID), .x))
-         
-         , ggpreds_density_msa = map(models_density_msa, ggeffects::ggpredict)
-         , ggpreds_compl_msa   = map(models_compl_msa, ggeffects::ggpredict)
-         , ggpreds_rich_msa    = map(models_rich_msa, ggeffects::ggpredict)
-         
-         , ggpreds_density_ua = map(models_density_ua, ggeffects::ggpredict)
-         , ggpreds_compl_ua   = map(models_compl_ua, ggeffects::ggpredict)
-         , ggpreds_rich_ua    = map(models_rich_ua, ggeffects::ggpredict)
-         
-         # random slope
-         # , ggpreds_density_msa_rs = map(models_density_msa_rs, ggeffects::ggpredict)
-         # , ggpreds_compl_msa_rs   = map(models_compl_msa_rs, ggeffects::ggpredict)
-         # , ggpreds_rich_msa_rs    = map(models_rich_msa_rs, ggeffects::ggpredict)
-         # 
-         # , ggpreds_density_ua_rs = map(models_density_ua_rs, ggeffects::ggpredict)
-         # , ggpreds_compl_ua_rs   = map(models_compl_ua_rs, ggeffects::ggpredict)
-         # , ggpreds_rich_ua_rs    = map(models_rich_ua_rs, ggeffects::ggpredict)
-         
-         ); toc() # < 10 seconds
-
-preds |> glimpse()
-
-# which fit is better, UA or MSA
-preds |> 
-  select(taxon, level, starts_with('models')) |> 
-  pivot_longer(cols = !c(taxon, level)) |> 
-  mutate(AIC = map(value, AIC)) |> 
-  unnest(AIC) |> 
-  arrange(taxon, level, desc(AIC))
-
-preds |>
-  select(taxon, level, ggpreds_density_msa) |> 
-  unnest(ggpreds_density_msa) |> 
-  unnest(ggpreds_density_msa) |> 
-  mutate(x = factor(x, levels = c('A', 'B', 'C', 'D', 'UA', 'MSA'))) |>
-  ggplot(aes(x, predicted, color = level)) + 
-  geom_hline(yintercept = 0, color = 'black') +
-  geom_point(aes(shape = level), position = position_dodge(width = 0.5), size = 3) + 
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), position = position_dodge(width = 0.5), width = .3) +
-  theme_bw(16) + 
-  theme(legend.position = c(.75, .15)) +
-  scale_color_viridis_d(direction = -1, option = 'B', begin = 0, end = .5) + 
-  labs(title = 'sampling density with per-taxon models (9 in total)'
-       , subtitle = 'birds are not representative!') + 
-  facet_wrap(~taxon, scales = 'free_y') + 
-  NULL
-
-
-preds |>
-  select(taxon, level, ggpreds_density_ua) |> 
-  unnest(ggpreds_density_ua) |> 
-  unnest(ggpreds_density_ua) |> 
-  mutate(x = factor(x, levels = c('A', 'B', 'C', 'D', 'UA', 'MSA'))) |>
-  ggplot(aes(x, predicted, color = level)) + 
-  geom_hline(yintercept = 0, color = 'black') +
-  geom_point(aes(shape = level), position = position_dodge(width = 0.5), size = 3) + 
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), position = position_dodge(width = 0.5), width = .3) +
-  theme_bw(16) + 
-  theme(legend.position = c(.75, .15)) +
-  scale_color_viridis_d(direction = -1, option = 'B', begin = 0, end = .5) + 
-  labs(title = 'sampling density with per-taxon models (9 in total) UA'
-       , subtitle = 'birds are not representative!') + 
-  facet_wrap(~taxon, scales = 'free_y') + 
-  NULL
-
-
-
-# completeness
-preds |>
-  select(taxon, level, ggpreds_compl_msa) |> 
-  unnest(ggpreds_compl_msa) |> 
-  unnest(ggpreds_compl_msa) |> 
-  mutate(x = factor(x, levels = c('A', 'B', 'C', 'D', 'UA', 'MSA'))) |>
-  ggplot(aes(x, predicted, color = level)) + 
-  geom_point(aes(shape = level), position = position_dodge(width = 0.5), size = 2) + 
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), position = position_dodge(width = 0.5), width = .3) +
-  theme_bw(16) + 
-  theme(legend.position = c(.75, .15)) +
-  scale_color_viridis_d(direction = -1, option = 'B', begin = 0, end = .5) + 
-  labs(title = 'completeness witih per-taxon models (9 in total)'
-       , subtitle = 'birds are not representative!') + 
-  facet_wrap(~taxon) + 
-  scale_y_continuous(expand = c(0, 0)
-                     , limits = c(0, 100)
-                     ) +
-  NULL
-
-
-
-# UA intercept
-preds |>
-  select(taxon, level, ggpreds_compl_ua) |> 
-  unnest(ggpreds_compl_ua) |> 
-  unnest(ggpreds_compl_ua) |> 
-  mutate(x = factor(x, levels = c('A', 'B', 'C', 'D', 'UA', 'MSA'))) |>
-  ggplot(aes(x, predicted, color = level)) + 
-  geom_point(aes(shape = level), position = position_dodge(width = 0.5), size = 2) + 
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), position = position_dodge(width = 0.5), width = .3) +
-  theme_bw(16) + 
-  theme(legend.position = c(.75, .15)) +
-  scale_color_viridis_d(direction = -1, option = 'B', begin = 0, end = .5) + 
-  labs(title = 'completeness witih per-taxon models (9 in total) UA'
-       , subtitle = 'birds are not representative!') + 
-  facet_wrap(~taxon) + 
-  scale_y_continuous(expand = c(0, 0)
-                     , limits = c(0, 100)
-                     ) +
-  NULL
-
-
-# MSA
-preds |>
-  select(taxon, level, ggpreds_rich_msa) |> 
-  unnest(ggpreds_rich_msa) |> 
-  unnest(ggpreds_rich_msa) |> 
-  mutate(x = factor(x, levels = c('A', 'B', 'C', 'D', 'UA', 'MSA'))) |>
-  ggplot(aes(x, predicted, color = level)) + 
-  geom_point(aes(shape = level), position = position_dodge(width = 0.5), size = 2) + 
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), position = position_dodge(width = 0.5), width = .3) +
-  theme_bw(16) + 
-  theme(legend.position = c(.75, .15)) +
-  scale_color_viridis_d(direction = -1, option = 'B', begin = 0, end = .5) + 
-  labs(title = 'richness witih per-taxon models (9 in total) MSA'
-       , subtitle = 'birds are not representative!') + 
-  facet_wrap(~taxon, scales = 'free_y') + 
-  # scale_y_continuous(expand = c(0, 0)
-  #                    , limits = c(0, 100)
-  #                    ) +
-  NULL
-
-
-# UA intercept richness
-preds |>
-  select(taxon, level, ggpreds_rich_ua) |> 
-  unnest(ggpreds_rich_ua) |> 
-  unnest(ggpreds_rich_ua) |> 
-  mutate(x = factor(x, levels = c('A', 'B', 'C', 'D', 'UA', 'MSA'))) |>
-  ggplot(aes(x, predicted, color = level)) + 
-  geom_point(aes(shape = level), position = position_dodge(width = 0.5), size = 2) + 
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), position = position_dodge(width = 0.5), width = .3) +
-  theme_bw(16) + 
-  theme(legend.position = c(.75, .15)) +
-  scale_color_viridis_d(direction = -1, option = 'B', begin = 0, end = .5) + 
-  labs(title = 'richness witih per-taxon models (9 in total) UA'
-       , subtitle = 'birds are not representative!') + 
-  facet_wrap(~taxon, scales = 'free_y') + 
-  # scale_y_continuous(expand = c(0, 0)
-  #                    , limits = c(0, 100)
-  #                    ) +
-  NULL
-
-
-```
-
-# viz: half eye and rain cloud TODO: add stat sig?
-```{r}
-
-# https://cran.r-project.org/web/packages/ggdist/vignettes/slabinterval.html # best of three
-# https://cran.r-project.org/web/packages/gghalves/vignettes/gghalves.html
-# https://rpubs.com/rana2hin/raincloud
-
-# 
-# comp |> 
-#   drop_na(taxon) |> 
-#   # mutate(level = ifelse(level == 'species', ' ', level))|>
-#   mutate(level = ifelse(level == 'species', ' ', 'family: ')) |>
-#   ggplot(aes(interaction(level, holc_grade, sep = ''), density, fill = holc_grade
-#              # , color = level
-#          )) + 
-#   geom_boxplot() +
-#   theme_bw(16) + 
-#   scale_fill_manual(values = holc_pal_f) +
-#   scale_y_log10() +
-#   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = c(.85, .25)) +
-#   # scale_y_sqrt() +
-#   # facet_wrap(~interaction(taxon, level)) +
-#   labs(title = 'sampling density') + 
-#   facet_wrap(~taxon, scales = 'free', nrow = 2) +
-#   NULL
-
-comp |> 
-  drop_na(taxon) |> 
-   mutate(grade = factor(ifelse(level == 'species', holc_grade, paste0(holc_grade, ': family')),
-         levels = c(  "A",  "A: family"
-                    , "B",  "B: family"
-                    , "C",  "C: family"
-                    , "D",  "D: family"
-                    , "UA", "UA: family"
-                    , "MSA","MSA: family"), ordered = TRUE)
-         , `HOLC Grade` = factor(holc_grade
-                               , levels = c(LETTERS[1:4], 'UA', 'MSA'))
-         ) |>
+  drop_na(taxon) |>
+  mutate(grade = factor(ifelse(level == 'species', holc_grade, paste0(holc_grade, ': family')),
+                        levels = c(  "A",  "A: family"
+                                   , "B",  "B: family"
+                                  , "C",  "C: family"
+                                  , "D",  "D: family"
+                                  , "UA", "UA: family"
+                                  , "MSA","MSA: family"), ordered = TRUE)
+                                  , `HOLC Grade` = factor(holc_grade
+                                  , levels = c(LETTERS[1:4], 'UA', 'MSA'))
+                                  ) |>
   # filter(taxon == 'aves') |>
   ggplot(aes(grade, density, fill = `HOLC Grade` # holc_grade
              # , color = level
-         )) + 
+             )) +
   ggdist::stat_halfeye(
     # adjust bandwidth
     adjust = 0.5,
@@ -620,13 +304,13 @@ comp |>
     # remove the slub interval
     .width = 0,
     point_colour = NA
-  ) + 
+    ) +
   geom_boxplot(
     width = 0.12,
     # removing outliers
     outlier.color = NA,
     # alpha = 0.5
-  ) +
+    ) +
   #  ggdist::stat_dots(
   #   # ploting on left side
   #   side = "left",
@@ -634,220 +318,114 @@ comp |>
   #   justification = 1.1,
   #   # adjust grouping (binning) of observations
   #   binwidth = 0.25
-  # ) + 
-  scale_y_log10(labels = scales::label_log(digits = 2)) +
+  # ) +
+  # scale_y_sqrt(labels = scales::label_log(digits = 2)) +
+    scale_y_log10(labels = scales::label_log(digits = 2)) +
   # scale_y_sqrt() +
-  scale_fill_manual(values = holc_pal_f) + 
+  scale_fill_manual(values = holc_pal_f) +
   facet_wrap(~taxon, scales = 'free', nrow = 2) +
-  theme_bw(16) + 
+  theme_bw(16) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = c(.85, .25)) +
-  # labs(title = 'sampling density') + 
+  # labs(title = 'sampling density') +
   labs(x = '', y = 'Sampling Density') +
   annotation_logticks(sides = 'l') +
   NULL
 
 ```
 
+# models
+```{r}
 
-
+# TODO add HOLC as random SLOPE and see which is best: small sample size taxon.. eh
+tic(); preds <-
+comp |>
+# replace_na(list(completeness = 0)) |>
+group_by(taxon, level) |>
+nest() |>
+# mutate(data        = map(data,  ~drop_na(.x))
+mutate(#  models_density = map(data, ~lm(density ~ holc_grade, .x))
+#, models_compl = map(data, ~lm(completeness ~ holc_grade, .x))
+models_density_msa = map(data, ~lme4::lmer(density ~ holc_grade + (1 | msa_GEOID), .x))
+, models_compl_msa   = map(data, ~lme4::lmer(completeness ~ holc_grade + (1 | msa_GEOID), .x))
+, models_rich_msa    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (1 | msa_GEOID), .x))
+, models_density_ua = map(data, ~lme4::lmer(density ~ holc_grade + (1 | ua_GEOID), .x))
+, models_compl_ua   = map(data, ~lme4::lmer(completeness ~ holc_grade + (1 | ua_GEOID), .x))
+, models_rich_ua    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (1 | ua_GEOID), .x))
+# random slope
+# , models_density_msa_rs = map(data, ~lme4::lmer(density ~ holc_grade + (holc_grade | msa_GEOID), .x))
+# , models_compl_msa_rs   = map(data, ~lme4::lmer(completeness ~ holc_grade + (holc_grade | msa_GEOID), .x))
+# , models_rich_msa_rs    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (holc_grade | msa_GEOID), .x))
+# , models_density_ua_rs = map(data, ~lme4::lmer(density ~ holc_grade + (holc_grade | ua_GEOID), .x))
+# , models_compl_ua_rs   = map(data, ~lme4::lmer(completeness ~ holc_grade + (holc_grade | ua_GEOID), .x))
+# , models_rich_ua_rs    = map(data, ~lme4::lmer(pred_richness ~ holc_grade + (holc_grade | ua_GEOID), .x))
+, ggpreds_density_msa = map(models_density_msa, ggeffects::ggpredict)
+, ggpreds_compl_msa   = map(models_compl_msa, ggeffects::ggpredict)
+, ggpreds_rich_msa    = map(models_rich_msa, ggeffects::ggpredict)
+, ggpreds_density_ua = map(models_density_ua, ggeffects::ggpredict)
+, ggpreds_compl_ua   = map(models_compl_ua, ggeffects::ggpredict)
+, ggpreds_rich_ua    = map(models_rich_ua, ggeffects::ggpredict)
+# random slope
+# , ggpreds_density_msa_rs = map(models_density_msa_rs, ggeffects::ggpredict)
+# , ggpreds_compl_msa_rs   = map(models_compl_msa_rs, ggeffects::ggpredict)
+# , ggpreds_rich_msa_rs    = map(models_rich_msa_rs, ggeffects::ggpredict)
+#
+# , ggpreds_density_ua_rs = map(models_density_ua_rs, ggeffects::ggpredict)
+# , ggpreds_compl_ua_rs   = map(models_compl_ua_rs, ggeffects::ggpredict)
+# , ggpreds_rich_ua_rs    = map(models_rich_ua_rs, ggeffects::ggpredict)
+); toc() # < 10 seconds
+preds |> glimpse()
+# which fit is better, UA or MSA
+preds |>
+select(taxon, level, starts_with('models')) |>
+pivot_longer(cols = !c(taxon, level)) |>
+mutate(AIC = map(value, AIC)) |>
+unnest(AIC) |>
+arrange(taxon, level, desc(AIC))
+preds |>
+select(taxon, level, ggpreds_density_msa) |>
+unnest(ggpreds_density_msa) |>
+mutate(x = factor(x, levels = c('A', 'B', 'C', 'D', 'UA', 'MSA'))) |>
+ggplot(aes(x, predicted, color = level)) +
+geom_hline(yintercept = 0, color = 'black') +
+geom_point(aes(shape = level), position = position_dodge(width = 0.5), size = 3) +
+geom_errorbar(aes(ymin = conf.low, ymax = conf.high), position = position_dodge(width = 0.5), width = .3) +
+theme_bw(16) +
+theme(legend.position = c(.75, .15)) +
+scale_color_viridis_d(direction = -1, option = 'B', begin = 0, end = .5) +
+labs(title = 'sampling density with per-taxon models (9 in total)'
+, subtitle = 'birds are not representative!') +
+facet_wrap(~taxon, scales = 'free_y') +
+NULL
+preds |>
+select(taxon, level, ggpreds_density_ua) |>
+unnest(ggpreds_density_ua) |>
+mutate(x = factor(x, levels = c('A', 'B', 'C', 'D', 'UA', 'MSA'))) |>
+ggplot(aes(x, predicted, color = level)) +
+geom_hline(yintercept = 0, color = 'black') +
+geom_point(aes(shape = level), position = position_dodge(width = 0.5), size = 3) +
+geom_errorbar(aes(ymin = conf.low, ymax = conf.high), position = position_dodge(width = 0.5), width = .3) +
+theme_bw(16) +
+theme(legend.position = c(.75, .15)) +
+scale_color_viridis_d(direction = -1, option = 'B', begin = 0, end = .5) +
+labs(title = 'sampling density with per-taxon models (9 in total) UA'
+, subtitle = 'birds are not representative!') +
+facet_wrap(~taxon, scales = 'free_y') +
+NULL
 # completeness
-```{r}
-
-
-# # get highly complete HOLC polygons
-# tibble(  filename = list.files('working_data/completeness', full.names = TRUE, recursive = TRUE, pattern = 'Estimators.CSV')
-#          , file_contents = map(filename, ~read_csv(., col_types = cols()))) |> 
-#   mutate(taxon = str_remove(filename, 'working_data/completeness/') |> 
-#            str_remove('/Estimators.CSV') |> 
-#            str_remove('_only') |> 
-#            str_remove('_graded')) |> 
-#   select(taxon, file_contents) |> 
-#   separate(taxon, into = c('taxon', 'level')) |> 
-#   mutate(level = ifelse(is.na(level), 'species', level)) |> 
-#   unnest(file_contents) |> 
-#   right_join(holc, by = c('Area' = 'id')) |> 
-#   # NA to zero on completeness
-#   mutate(density = Records / area_holc_km2) |>  
-#   left_join(read_csv('working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv', col_types = 'cc') # makes type = character
-#             , by = c('Area' = 'id')
-#   ) |> 
-#   left_join(read_csv('working_data/MSA_UA_lookup.csv') |> 
-#               mutate(msa_GEOID = as.character(msa_GEOID)) |> 
-#               select(msa_GEOID, ua_GEOID)
-#             , by = 'msa_GEOID') |> 
-#   select(id = Area, completeness = Completeness, taxon) |> 
-#   filter(completeness > 80) |> 
-#   write_csv(paste0('working_data/highly_complete_holcs/highly_complete_holcs_', Sys.Date(), '.csv'))
-
-read_csv('working_data/highly_complete_holcs/highly_complete_holcs_2023-04-04.csv') |>
-  ggplot(aes(completeness)) + geom_density()
-
-# highly_complete <- read_csv('working_data/highly_complete_holcs/highly_complete_holcs_2023-03-02.csv')
-
-(highly_complete_aves <-
-  # read_csv('working_data/highly_complete_holcs/highly_complete_holcs_2023-03-02.csv') |> 
-    read_csv('working_data/highly_complete_holcs/highly_complete_holcs_2023-04-04.csv') |> 
-    filter(taxon == 'aves')) # ~10% of all HOLC polygons
-  
-
-(aves_files <- 
-    list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_HOLC/aves'
-               , full.names = TRUE))
-
-
-# # sloppy but works (all of the columns, growing a vector [ewwey])
-# # good to know though for when we want to look at non-graded areas!
-# # UPDATE: will do non-graded 1 polygon at a time)
-# tic(); for(i in 1:length(aves_files)){
-#   print(i)
-#   if(i == 1){ aves_holc <- read_fst(aves_files[i]) }
-#   else      { aves_holc <- rbind(aves_holc, read_fst(aves_files[i])) }
-#   }; toc(); beepr::beep() # ~2 mins
-# 
-# aves_holc |> dim() # 51,591,321 records!
-
-
-# # sloppy but works (all of the columns, growing a vector [ewwey])
-# tic(); for(i in 1:length(aves_files)){
-#   print(i)
-#   if(i == 1){
-#     
-#     aves_holc_highly_complete <- 
-#       read_fst(aves_files[i]) |> 
-#       tibble() |> 
-#       filter(id %in% highly_complete_aves$id) |> 
-#       distinct(id, taxon, family, genus, species) |> 
-#       select(id, everything())
-#     
-#     }
-#   else{
-#     
-#     aves_holc_highly_complete <- 
-#       rbind(aves_holc_highly_complete
-#             , read_fst(aves_files[i]) |> 
-#               tibble() |> 
-#               filter(id %in% highly_complete_aves$id) |> 
-#               distinct(id, taxon, family, genus, species) |> 
-#               select(id, everything())
-#       )
-#     }
-#   }; toc(); beepr::beep() # ~30 seconds
-# 
-# 
-# aves_holc_highly_complete |> 
-#   arrange(id) |> 
-#   write_csv(paste0('working_data/highly_complete_holcs_aves_species_lists/highly_complete_holcs_aves_species_lists_', Sys.Date(), '.csv'))
-
-
-aves_holc_highly_complete <-
-  read_csv('working_data/highly_complete_holcs_aves_species_lists/highly_complete_holcs_aves_species_lists_2023-04-04.csv')
-
-
-comp |> 
-  select(completeness, taxon, msa_GEOID) |> 
-  drop_na(completeness) |> 
-  pivot_wider(msa_GEOID, names_from = taxon, values_from = completeness)
-
-comp |> 
-  select(completeness, taxon, msa_GEOID) |> 
-  drop_na(completeness) |> 
-  dplyr::group_by(msa_GEOID, taxon) %>%
-  dplyr::summarise(n = dplyr::n(), .groups = "drop") %>%
-  dplyr::filter(n > 1L) 
-  
-
-# correlations for completeness by taxon
-corrs_completeness_taxon <-
-  tibble(  filename = list.files('working_data/completeness', full.names = TRUE, recursive = TRUE, pattern = 'Estimators.CSV')
-         , file_contents = map(filename, ~read_csv(., col_types = cols()))) |> 
-  mutate(taxon = str_remove(filename, 'working_data/completeness/') |> 
-           str_remove('/Estimators.CSV') |> 
-           str_remove('_only') |> 
-           str_remove('_graded')) |> 
-  select(taxon, file_contents) |> 
-  separate(taxon, into = c('taxon', 'level')) |> 
-  mutate(level = ifelse(is.na(level), 'species', level)) |> 
-  unnest(file_contents) |> 
-  right_join(holc, by = c('Area' = 'id')) |> 
-  # NA to zero on completeness
-  mutate(density = Records / area_holc_km2) |>  
-  left_join(read_csv('working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv', col_types = 'cc') # makes type = character
-            , by = c('Area' = 'id')
-  ) |> 
-  left_join(read_csv('working_data/MSA_UA_lookup.csv') |> 
-              mutate(msa_GEOID = as.character(msa_GEOID)) |> 
-              select(msa_GEOID, ua_GEOID)
-            , by = 'msa_GEOID') |> 
-  select(id = Area, completeness = Completeness, taxon, level) |> 
-  unite('taxon', taxon, level, sep = '_') |> 
-  drop_na(completeness) |> 
-  pivot_wider(id, names_from = taxon, values_from = completeness, values_fn = mean) |> 
-  select(-id) |> # %$% Hmisc::rcorr() # TODO ADD CONF.INT?
-  cor(use = 'pairwise.complete.obs') |> 
-  round(2) |> # life histories?
-  data.frame() |> 
-  rownames_to_column() |> 
-  pivot_longer(-rowname) |> 
-  filter(rowname != name)
-
-corrs_completeness_taxon |> 
-  arrange(desc(value)) |> 
-  filter(row_number() %% 2 != 0) # deletes even numbered rows
-  
-corrs_completeness_taxon |> 
-  arrange(desc(value)) |> 
-  filter(row_number() %% 2 != 0) |> # deletes even numbered rows
-  unite('species_pair', rowname, name) |> 
-  ggplot(aes(value, reorder(species_pair, value))) +
-  geom_vline(xintercept = 0) +
-  geom_point() +
-  theme_bw(16) +
-  NULL
-  
-```
-
-
-# get the non-graded MSA / UAs
-```{r}
-
-list.files('completeness_MSA')
-list.files(full.names = TRUE, recursive = TRUE)
+preds |>
+select(taxon, level, ggpreds_compl_msa) |>
+unnest(ggpreds_compl_msa) |>
+mutate(x = factor(x, levels = c('A', 'B', 'C', 'D', 'UA', 'MSA'))) |>
+ggplot(aes(x, predicted, color = level)) +
+geom_point(aes(shape = level), position = position_dodge(width = 0.5), size = 2) +
+geom_errorbar(aes(ymin = conf.low, ymax = conf.high), position = position_dodge(width = 0.5), width = .3) +
+theme_bw(16) +
+theme(legend.position = c(.75, .15)) +
+scale_color_viridis_d(direction = -1, option = 'B', begin = 0, end = .5) +
 
 
 
 ```
-
-
-
-
-# link HOLC TO MSA (repeat for UA?)
-```{r}
-# which MSAs surround which UAs, and which holc polygons?
-
-(holc_msa_keys <-
-    read_csv('working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv'
-             , col_types = 'cc')) # makes type = character
-
-st_read('../working_data/MSA_donut/msa_ungraded.gpkg', as_tibble = TRUE) |> 
-      st_drop_geometry()
-
-
-(ua_with_holc <- st_read('UA/UA_as_geopackage_2023-01-23 15-48-08.gpkg') |> rename(ua_GEOID = GEOID))
-
-
-(ua_ids <- 
-  st_read('working_data/UA/UA_as_geopackage_2023-01-23 15-48-08.gpkg') |> 
-  st_drop_geometry() |> 
-  tidylog::select(ua_GEOID = GEOID) |> 
-  pull(ua_GEOID))
-
-(ua_msa_int <- read_csv('working_data/MSA_UA_lookup.csv') |> 
-  filter(ua_GEOID %in% ua_ids))
-
-
-```
-
-
 
 
 

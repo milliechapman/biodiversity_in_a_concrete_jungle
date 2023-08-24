@@ -1,0 +1,464 @@
+---
+title: "whats up with wetlands?"
+author: "Dexter H. Locke, PhD"
+date: "`r format(Sys.time())`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# rasterize these polygons
+#     fasterize
+# then summarize the pixels per polygon
+
+
+https://www.fws.gov/program/national-wetlands-inventory/download-state-wetlands-data
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# 0 set up: load libraries, custom functions, set defaults
+```{r}
+
+# load libraries
+# packages we'll be using
+packs <- c(
+    'tidyverse'  # a must have
+  , 'tidylog'    # prints out what was done in dplyr and tidr
+  # , 'gbifdb' # GBIF
+  # , 'fst' # a faster table, makes outputs files much smaller, too.
+  # , 'terra'
+  # , 'KnowBR'    # creates biodiversity estimates like completeness.
+  , 'tidycensus'      # Census access
+  , 'sf'        # spatial support
+  , 'mapview'   # webmaps
+  , 'janitor'   # cleans things up, also pipe-friendly cross-tabulations
+  , 'tictoc'    # times things
+  , 'beepr'     # makes noises
+)
+
+
+# check for all of the libraries, install if you don't have them
+if (length(setdiff(packs, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packs, rownames(installed.packages())))  
+}
+
+# load them
+vapply(packs, library, character.only = TRUE, logical(1), logical.return = TRUE, quietly = TRUE)
+
+
+
+# custom function for "Not In"
+`%nin%` <- Negate(`%in%`)
+
+
+# redlining colors
+holc_pal <- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              #, '#A9A9A9'
+              ) # dark gray)
+
+holc_pal_f<- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              , '#A9A9A9'
+              , '#000000')
+
+# fixes mapview
+mapviewOptions(fgb = FALSE)
+
+
+# Paralise any simple features analysis.
+# https://www.spatialanalytics.co.nz/post/2018/04/01/fixing-st-par/
+# define
+st_parallel <- function(sf_df, sf_func, n_cores, ...){
+
+  # Create a vector to split the data set up by.
+  split_vector <- rep(1:n_cores, each = nrow(sf_df) / n_cores, length.out = nrow(sf_df))
+
+  # Perform GIS analysis
+  split_results <- split(sf_df, split_vector) %>%
+    parallel::mclapply(function(x) sf_func(x, ...), mc.cores = n_cores)
+  
+  
+  # Define the output_class. If length is greater than two, then grab the second variable.
+  output_class <- class(split_results[[1]])
+  if (length(output_class) == 2){
+    output_class <- output_class[2]
+  }
+  
+  # Combine results back together. Method of combining depends on the output from the function.
+  if (output_class == "matrix"){
+    result <- do.call("rbind", split_results)
+    names(result) <- NULL
+  } else if (output_class == "sfc") {
+    result <- do.call("c", split_results)
+    result <- sf_func(result) # do.call combines the list but there are still n_cores of the geometry which had been split up. Running st_union or st_collect gathers them up into one, as is the expected output of these two functions. 
+  } else if (output_class %in% c('list', 'sgbp') ){
+    result <- do.call("c", split_results)
+    names(result) <- NULL
+  } else if (output_class == "data.frame" ){
+    result <- do.call("rbind", split_results)
+  } else {
+    stop("Unknown class. st_parallel only accepts the following outputs at present: sfc, list, sf, matrix, sgbp.")
+  }
+  
+  # Return result
+  return(result)
+}
+```
+
+# 1 which states do we need to download?
+```{r}
+
+# pull from msa
+msa <- st_read('working_data/MSA/msa_as_geopackage_2022-12-08 15-40-07.gpkg')
+
+states_msa <- 
+  msa |> 
+  st_drop_geometry() |> 
+  # tibble() |> 
+  select(msa_name) |> 
+  mutate(msa_name = str_remove(msa_name,  ' Metro Area') |> 
+           str_remove(' Micro Area')) |> 
+  separate(msa_name, into = c('trash', 'state'), sep = ', ') |> 
+  separate(state, into = c('state1', 'state2', 'state3', 'state4'), sep = '-') |> 
+  select(starts_with('state')) |> 
+  rowid_to_column() |> 
+  pivot_longer(-rowid) |> 
+  distinct(value) |> 
+  filter(!is.na(value)) |> 
+  arrange(value) |> data.frame()# 40
+
+(states <- 
+  st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg') |> 
+  st_drop_geometry() |> 
+  distinct(state)) # 38
+
+# go with MSA-derived states!
+states_msa |> left_join(states, by = c('value' = 'state'), keep = TRUE)
+
+(states <- states_msa); rm(states_msa)
+```
+
+# 2 unzip
+```{r eval=FALSE, include=FALSE}
+
+list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/zipped_wetlands')
+
+# # get zip files
+# (zip_path <- 'input_data/nhgis0060_shape')
+(zip_path <- '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/zipped_wetlands')
+(zip_files<- list.files(zip_path, full.names = TRUE))
+(out_path <- '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/')
+
+# # done once, no need to re-do
+# tic(); for(i in zip_files){
+#   print(i)
+#   unzip(i, exdir = out_path)
+#   file.remove(i)
+# }; toc() # ~3 mins
+
+# # remove the zips?
+# file.remove('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/zipped_wetlands')
+
+```
+
+
+# 3 examine
+```{r eval=FALSE, include=FALSE}
+list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/')
+st_layers('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/WV_geodatabase_wetlands.gdb')
+
+slug <- '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/WV_geodatabase_wetlands.gdb'
+wv_nwi <- 
+  st_read(
+    slug
+    # , 'WV_Wetlands_Project_Metadata' # grid with meta
+    # , 'WV_Wetlands_Historic_Map_Info'  # less-extensive grid, with meta
+    # , 'West_Virginia' # state outline w grids.
+    , 'WV_Wetlands'
+  )
+
+# 2x checks
+wv_nwi |> glimpse()
+wv_nwi |> 
+  st_drop_geometry() |> 
+  tabyl(WETLAND_TYPE)
+
+wv_nwi |> 
+  sample_n(1000) |> 
+  mapview()
+
+```
+
+
+# test another state out.. ugh overlaps, large duplicative area - what to do?
+```{r eval=FALSE, include=FALSE}
+list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/')
+st_layers('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/MD_geodatabase_wetlands.gdb')
+
+slug <- '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/MD_geodatabase_wetlands.gdb'
+md_nwi <- 
+  st_read(
+    slug
+    # , 'WV_Wetlands_Project_Metadata' # grid with meta
+    # , 'WV_Wetlands_Historic_Map_Info'  # less-extensive grid, with meta
+    # , 'Maryland' # state outline w grids.
+    , 'WV_Wetlands'
+  )
+
+# 2x checks
+md_nwi |> glimpse()
+md_nwi |> 
+  st_drop_geometry() |> 
+  tabyl(WETLAND_TYPE)
+
+md_nwi |> 
+  sample_n(1000) |> 
+  mapview()
+
+```
+
+
+
+# 4 clipping geometry
+```{r old outdated, eval=FALSE, include=FALSE}
+
+sf_use_s2(FALSE) # suppresses errors, allows st_erase to run
+
+
+nwi_crs <- 
+  st_read(
+    '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/WV_geodatabase_wetlands.gdb'
+    , 'WV_Wetlands'
+  ) |> st_crs()
+
+
+list.files('working_data/holc_polys_saved')
+
+msa  <- st_read('working_data/MSA/msa_as_geopackage_2022-12-08 15-40-07.gpkg') |> select() |> summarise()
+ua   <- st_read('working_data/UA/UA_as_geopackage_2023-01-23 15-48-08.gpkg') |> select() |> summarise()
+holc <- st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg') |> select() |> summarise()
+
+
+clipper_geom_temp  <- st_union(msa, ua)
+clipper_geom       <- st_union(clipper_geom_temp, holc) |> st_transform(crs = nwi_crs)
+
+clipper_geom |> mapview()
+
+# clean things up
+rm(msa, ua, holc)
+rm(clipper_geom_temp)
+
+
+
+```
+
+
+# 4 clipping geometry - by state
+## A get state boundaries
+```{r}
+
+(state_boundaries <- 
+  get_acs(geography = 'state'
+          , variables = "B19013_001"
+          , state = states$value
+          , year = 2020
+          , geometry = TRUE) |> 
+  st_transform(crs = st_crs(msa)) |> 
+  select(census_name = NAME))
+
+```
+
+
+## B consolidate geometries to clip NWI down to: MSA, UA, HOLC
+```{r}
+
+sf_use_s2(FALSE) # suppresses errors, allows overlays to run
+
+# get the crs
+nwi_crs <- 
+  st_read(
+    '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/WV_geodatabase_wetlands.gdb'
+    # , 'WV_Wetlands'
+    , query = 'SELECT * from WV_Wetlands limit 5'
+    ) |> 
+  st_crs()
+
+
+list.files('working_data/holc_polys_saved')
+
+
+msa_state  <- 
+  st_read('working_data/MSA/msa_as_geopackage_2022-12-08 15-40-07.gpkg') |> 
+  select(msa_name) |> 
+  mutate(msa_name = str_remove(msa_name,  ' Metro Area') |> 
+           str_remove(' Micro Area')) |> 
+  separate(msa_name, into = c('msa_text', 'state'), sep = ', ') |> 
+  separate(state, into = c('state1', 'state2', 'state3', 'state4'), sep = '-') |> 
+  pivot_longer(cols = starts_with('state'), values_to = 'state') |> 
+  drop_na(state) |> 
+  group_by(state) |> 
+  summarise() |> 
+  st_intersection(state_boundaries) |> 
+  group_by(census_name) |> 
+  summarise()
+
+# look
+msa_state |> mapview()
+
+# # do MSA's fully contain HOLC polygons
+# something is wrong with the HOLC polygons!
+# tic(); test_overlap <- 
+#   st_parallel(
+#       msa_state
+#     , st_difference
+#     , 6
+#     , holc
+#     ); toc()
+
+
+# # repeat the breaking up
+ua_state <-
+  st_read('working_data/UA/UA_as_geopackage_2023-01-23 15-48-08.gpkg') |> 
+  select(ua_name = NAME) |> 
+  mutate(ua_name = str_remove(ua_name, ' Urbanized Area \\(2010\\)') |> 
+           str_remove(' Urban Cluster \\(2010\\)') |> 
+           str_replace_all('--', ',')) |> 
+  separate(ua_name, into = c('ua_text', 'state'), sep = ', ') |> 
+  separate(state, into = c('state1', 'state2', 'state3', 'state4')) |> 
+  pivot_longer(cols = starts_with('state'), values_to = 'state') |> 
+  drop_na(state) |> 
+  group_by(state) |> 
+  summarise() |> 
+  st_intersection(state_boundaries) |> 
+  group_by(census_name) |> 
+  summarise()
+
+msa_state |> mapview() + mapview(ua_state) # very nice
+
+
+tic(); (
+  clipper_geom <- 
+    msa_state |> 
+    st_cast('MULTIPOLYGON') |> 
+    bind_rows(ua_state) |> 
+    group_by(census_name) |> 
+    summarise() |> 
+    st_transform(crs = nwi_crs) |> 
+    left_join(
+      fips_codes |> distinct(state, state_name)
+      , by = c('census_name' = 'state_name')
+      ) |> 
+    select(census_name, state)
+  ); toc() # ~3 seconds
+
+clipper_geom |> 
+  # slice(1) |> 
+  mapview()
+
+clipper_geom
+
+# clean things up
+rm(msa_state, ua_state)
+rm(msa)
+
+
+
+
+```
+
+
+# 5 bring in a state, clip its water down, save out (just cuz), read back in and summarize per holc poly
+TODO add other polygons
+```{r}
+
+
+holc <-
+  st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg') |> 
+  st_make_valid()
+
+parallelly::availableCores() # 16, yeah!
+ncore <- 10  # How many do you want to use?
+
+set.seed(1)
+
+# tic(); for(i in states[c(1, 2),]){ # for testing
+# tic(); for(i in states$value){
+tic(); for(i in states$value[c(32: 40)]){ # MI, MS, NY failed
+  tic()
+  print('==============================================================================================')
+  print(i)
+  path <- paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/', i, '_geodatabase_wetlands.gdb')
+  
+  nwi  <- 
+    st_read(path, paste0(i, '_Wetlands')) |> 
+    select(attribute = ATTRIBUTE, wetland_type = WETLAND_TYPE)
+  
+  beepr::beep()
+  
+  tic(); st_parallel(
+      nwi  
+    , st_intersection
+    , ncore
+    , clipper_geom |> filter(state == i) # preselection, saves SOOO much time.
+    ) %>% 
+    mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
+    st_write(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_clipped/', i, '_nwi.gpkg')); toc()
+  
+  beepr::beep()
+  
+  clipped_nwi <- 
+    st_read(
+      paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_clipped/', i, '_nwi.gpkg')
+    ) |> 
+    st_transform(crs = st_crs(holc))
+  
+  beepr::beep()
+
+  holc_temp <- 
+    holc |> 
+    # st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg') |> 
+    filter(state == i) |> 
+    select(id, area_holc_km2)
+  
+  beepr::beep()
+  
+  st_parallel(
+      clipped_nwi
+    , st_intersection
+    , ncore
+    , holc_temp
+    ) |> 
+    # st_write(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_holc_int/', i, '_nwi.gpkg'))
+    st_drop_geometry() |> 
+    group_by(id) |> 
+    summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE)) |> 
+    write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_holc_int/', i, '_nwi.csv'))
+
+  toc()
+  beepr::beep()
+  gc()
+  }; toc(); beepr::beep()
+
+
+# nwi_cliped
+# nwi_cliped |> glimpse()
+# nwi_cliped |> sample_n(1000) |> mapview()
+
+
+
+```
+
+
+
+
+
+
+
