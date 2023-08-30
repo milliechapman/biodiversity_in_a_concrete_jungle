@@ -36,6 +36,7 @@ packs <- c(
   , 'janitor'   # cleans things up, also pipe-friendly cross-tabulations
   , 'tictoc'    # times things
   , 'beepr'     # makes noises
+  , 'sfarrow'
 )
 
 
@@ -146,6 +147,7 @@ states_msa |> left_join(states, by = c('value' = 'state'), keep = TRUE)
 ```
 
 # 2 unzip
+## A geodatabase - defunct, did not work (erroneous geometries)
 ```{r eval=FALSE, include=FALSE}
 
 list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/zipped_wetlands')
@@ -168,8 +170,78 @@ list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/zipped_we
 
 ```
 
+## B shapefiles - no need to run this again.
+```{r eval=FALSE, include=FALSE}
+
+list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/zipped_wetlands')
+
+# # get zip files
+# (zip_path <- 'input_data/nhgis0060_shape')
+(zip_path <- '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/zipped_wetlands')
+(zip_files<- list.files(zip_path, full.names = TRUE))
+(out_path <- '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/')
+
+# done once, no need to re-do
+tic(); for(i in zip_files){
+  print(i)
+  unzip(i, exdir = out_path)
+  file.remove(i)
+}; toc() # ~3 mins
+
+# remove the zips? Yes.
+file.remove('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/zipped_wetlands')
+
+# remove unnecesary files..
+# Wetlands AND NOT HISTORIC OR RIPARIAN
+# 
+# Yes
+# Wetlands
+# Riparian
+# 
+# No
+# Project
+# Metadata
+# Historic
+
+# # tibble of all of the contents
+# (
+#   shape_names <- 
+#     tibble(filename = list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/'
+#                                  , recursive = TRUE
+#                                  ))
+#   )
+# 
+# # list of things to keep
+# (
+#   files_to_keep <- # will reduce to just *.shp in a second
+#     shape_names |> #View()
+#     filter(str_detect(filename, paste(c("Wetlands", "Riparian"), collapse = '|'))) |> # has Either wetlands or riparian
+#     filter(str_detect(filename, "Historic", negate = TRUE)) |> # drop historic
+#     filter(str_detect(filename, "Project", negate = TRUE)) |> # view() # drop project
+#     filter(str_detect(filename, "Metadata", negate = TRUE)) |> # view() # drop project
+#     pull(filename)
+#   )
+# 
+# length(files_to_keep) / 8 #:-/
+# 
+# files_to_remove <- 
+#   shape_names |> 
+#   filter(filename %nin% files_to_keep)
+# 
+# files_to_remove |> View() # looks good.
+# 
+# for(i in files_to_remove){
+#   print(i)
+#   file.remove(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/', i))
+# }
+# 
+# rm(files_to_keep, files_to_remove) # clean up
+
+```
+
 
 # 3 examine
+## A gdb - defunct
 ```{r eval=FALSE, include=FALSE}
 list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/')
 st_layers('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/WV_geodatabase_wetlands.gdb')
@@ -196,8 +268,50 @@ wv_nwi |>
 
 ```
 
+## B shp
+```{r}
 
-# test another state out.. ugh overlaps, large duplicative area - what to do?
+
+shapes_to_iterate_over <- 
+  tibble(filenames = 
+           list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/'
+                      , recursive = TRUE
+                      , pattern = 'shp$'
+                      , full.names = TRUE
+                      )
+         ) |> 
+  mutate(state = str_remove_all(filenames, '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands//') |>
+           str_sub(1,2)
+         , item = str_remove_all(filenames, '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands//') |>
+           str_remove_all('shapefile_wetlands') |>
+           str_remove_all('.shp') |>
+           str_remove('.._\\/')
+         )
+
+shapes_to_iterate_over$item
+
+random_shape <- 
+  shapes_to_iterate_over |> 
+  sample_n(1) |>
+  mutate(shp = map(filenames, ~st_read(.))) |> 
+  unnest(shp)
+
+
+# 2x checks
+random_shape |> glimpse()
+random_shape |> 
+  st_drop_geometry() |> 
+  tabyl(WETLAND_TY)
+
+random_shape |> 
+  st_as_sf() |> 
+  sample_n(1000) |> 
+  mapview()
+
+```
+
+
+# test another state out.. ugh overlaps, large duplicative area - what to do? Clipping geom reduces to state-specific union of MSA, UA, and HOLC boundaries
 ```{r eval=FALSE, include=FALSE}
 list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/')
 st_layers('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/MD_geodatabase_wetlands.gdb')
@@ -226,8 +340,8 @@ md_nwi |>
 
 
 
-# 4 clipping geometry
-```{r old outdated, eval=FALSE, include=FALSE}
+# 4 clipping geometry - old outdated
+```{r eval=FALSE, include=FALSE}
 
 sf_use_s2(FALSE) # suppresses errors, allows st_erase to run
 
@@ -281,17 +395,11 @@ rm(clipper_geom_temp)
 
 sf_use_s2(FALSE) # suppresses errors, allows overlays to run
 
-# get the crs
-nwi_crs <- 
-  st_read(
-    '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/WV_geodatabase_wetlands.gdb'
-    # , 'WV_Wetlands'
-    , query = 'SELECT * from WV_Wetlands limit 5'
-    ) |> 
-  st_crs()
+
+nwi_crs <- random_shape |> st_as_sf() |> st_crs()
 
 
-list.files('working_data/holc_polys_saved')
+# list.files('working_data/holc_polys_saved')
 
 
 msa_state  <- 
@@ -346,7 +454,7 @@ msa_state |> mapview() + mapview(ua_state) # very nice
 tic(); (
   clipper_geom <- 
     msa_state |> 
-    st_cast('MULTIPOLYGON') |> 
+    st_cast('MULTIPOLYGON') |> # why?
     bind_rows(ua_state) |> 
     group_by(census_name) |> 
     summarise() |> 
@@ -355,7 +463,10 @@ tic(); (
       fips_codes |> distinct(state, state_name)
       , by = c('census_name' = 'state_name')
       ) |> 
-    select(census_name, state)
+    select(census_name, state) |> 
+    # st_simplify() |> # NEW
+    st_make_valid() |> # NEW
+    filter(st_is(geom, c('POLYGON', 'MULTIPOLYGON'))) # NEW
   ); toc() # ~3 seconds
 
 clipper_geom |> 
@@ -375,47 +486,259 @@ rm(msa)
 
 
 # 5 bring in a state, clip its water down, save out (just cuz), read back in and summarize per holc poly
-TODO add other polygons
+TODO add other (NON-HOLC) polygons
 ```{r}
+
+
+rm(random_shape)
 
 
 holc <-
   st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg') |> 
   st_make_valid()
 
+ua_ungraded <- 
+  st_read('working_data/UA_donut/UA_ungraded_2023-01-23 16-05-42.gpkg') |> 
+  select(ua_GEOID = GEOID) |> 
+  st_transform(crs = st_crs(holc))
+
+msa_ungraded <- 
+  st_read('working_data/MSA_donut/msa_ungraded.gpkg') |> 
+  select(msa_GEOID) |> 
+  st_transform(crs = st_crs(holc))
+
+
+
+
 parallelly::availableCores() # 16, yeah!
-ncore <- 10  # How many do you want to use?
+ncore <- 8  # How many do you want to use?
+# ncore <- 4  # How many do you want to use?
 
-set.seed(1)
+set.seed(1); gc()
 
-# tic(); for(i in states[c(1, 2),]){ # for testing
-# tic(); for(i in states$value){
-tic(); for(i in states$value[c(32: 40)]){ # MI, MS, NY failed
+tic(); for(i in shapes_to_iterate_over$filenames){
   tic()
   print('==============================================================================================')
   print(i)
-  path <- paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/', i, '_geodatabase_wetlands.gdb')
   
-  nwi  <- 
-    st_read(path, paste0(i, '_Wetlands')) |> 
-    select(attribute = ATTRIBUTE, wetland_type = WETLAND_TYPE)
+  # get state code
+  st_code <-
+    shapes_to_iterate_over |> 
+    filter(filenames == i) |> 
+    pull(state)
   
-  beepr::beep()
+  # get 'item' for naming
+  item <-
+    shapes_to_iterate_over |> 
+    filter(filenames == i) |> 
+    pull(item)
   
+  # read in wetlands/riparian area
+  tic(); nwi <- 
+    st_read(i
+            , query = paste0('SELECT WETLAND_TY as wetland_type FROM ', item) # needed?
+            ); toc(); beep()
+  
+  # reduce clipper to state
+  (clipper_geom_temp <- clipper_geom |> filter(state == st_code))
+  
+  # intersect item per state
+  tic(); clipped_nwi <- 
+    st_parallel(
+        nwi
+      , st_intersection
+      , ncore
+      , clipper_geom_temp # pre-selection, saves SOOO much time.
+      ) |> 
+    select(wetland_type, state) |> 
+    filter(st_is(geometry, c('POLYGON', 'MULTIPOLYGON'))) |> # drop linestrings, if any
+    st_cast('POLYGON') 
+  
+  # free up some memory
+  rm(nwi)
+  
+  # write out clipped parquet file of
+  clipped_nwi |> 
+    st_write_parquet(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_clipped/', item, '_nwi.parquet')); toc(); beep() 
+  
+  # clipped nwi reproject to match holc polys
+  tic(); clipped_nwi <- 
+    clipped_nwi |> 
+    st_transform(crs = st_crs(holc)); toc(); beep()
+  
+  # read in reduced holc polygons
+  holc_temp <- 
+    holc |>
+    select(id, state) |> 
+    filter(state == st_code) |> 
+    select(id)
+  
+  # intersect clipped nwi with holc polygons, calculate overlap per poly AND per type of wetland
   tic(); st_parallel(
-      nwi  
+      clipped_nwi
     , st_intersection
     , ncore
-    , clipper_geom |> filter(state == i) # preselection, saves SOOO much time.
-    ) %>% 
+    , holc_temp
+    ) %>%
     mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
-    st_write(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_clipped/', i, '_nwi.gpkg')); toc()
+    st_drop_geometry() |> 
+    group_by(id, wetland_type) |> # holc polygon AND by wetland type
+    summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE)) |> 
+    write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/holc_', item, '_nwi.csv')); toc(); beep()
+  
+  # URBAN AREA polygons, calculate overlap per poly AND per type of wetland
+  tic(); st_parallel(
+      clipped_nwi
+    , st_intersection
+    , ncore
+    , ua_ungraded
+    ) %>%
+    mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
+    st_drop_geometry() |> 
+    group_by(ua_GEOID, wetland_type) |> # msa polygon AND by wetland type
+    summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE)) |> 
+    write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/ua_', item, '_nwi.csv')); toc(); beep()
+  
+  # MSA polygons, calculate overlap per poly AND per type of wetland
+  tic(); st_parallel(
+      clipped_nwi
+    , st_intersection
+    , ncore
+    , msa_ungraded
+    ) %>%
+    mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
+    st_drop_geometry() |> 
+    group_by(msa_GEOID, wetland_type) |> # msa polygon AND by wetland type
+    summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE)) |> 
+    write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/msa_', item, '_nwi.csv')); toc(); beep()
+  
+  toc(); beep()
+  gc()
+}; toc()
+
+
+
+```
+
+old and ewwwey
+
+```{r}
+# tic(); for(i in states[c(1, 2),]){ # for testing
+# tic(); for(i in states$value){
+# tic(); for(i in states$value[c(32: 40)]){ # MI, MS, NY failed
+# tic(); for(i in states$value){
+# tic(); for(i in states$value[c((16:40))]){ # MI failed
+# tic(); for(i in states$value[c((40:19))]){ # SC failed
+  tic()
+  print('==============================================================================================')
+  print(i)
+  
+  # TODO update
+  path <- paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/', i, '_geodatabase_wetlands.gdb')
+  
+  # # OG    
+  # query = 'SELECT * FROM \"combined_blocks_2020_no_water_single_part\" WHERE GISJOIN = \"G06003702060102000\"'
+  
+  # tic(); nwi <- 
+  #   st_read(path, paste0(i, '_Wetlands')) |> 
+  #   select(attribute = ATTRIBUTE, wetland_type = WETLAND_TYPE) |> 
+  #   rowid_to_column(); toc()
+  # 
+  tic(); nwi <- 
+    st_read(path
+            # , query = paste0('SELECT attribute = ATTRIBUTE, WETLAND_TYPE FROM ', i, '_Wetlands limit 10') # for testing
+            , query = paste0('SELECT ATTRIBUTE as attribute, WETLAND_TYPE as wetland_type FROM ', i, '_Wetlands')
+            ) |> 
+    # st_as_sf() |> # change type
+    rowid_to_column(); toc(); beepr::beep() # ~2 mins for SC
+  
+  tic(); check <- nwi |> st_is_valid(reason = TRUE); toc(); beepr::beep() # ~11 mins for SC
+  
+  # tic(); nwi <-
+  #   st_read(path
+  #           , promote_to_multi = FALSE
+  #           , as_tibble = TRUE
+  #           , query = paste0('SELECT attribute = ATTRIBUTE, WETLAND_TYPE FROM ', i, '_Wetlands limit 11000') # for testing
+  #           # , query = paste0('SELECT ATTRIBUTE as attribute, WETLAND_TYPE as wetland_type FROM ', i, '_Wetlands')
+  #           ) |>
+  #   # st_make_valid(); toc(); beepr::beep()
+  #   mutate(Shape = st_as_sfc(geos::geos_make_valid(Shape))); toc(); beepr::beep() # ~2 mins for SC
+  #   # mutate(Shape = st_as_sfc(Shape)
+#            
+# test <- nwi |> sample_n(1000) |> st_cast('MULTIPOLYGON') |> mutate(Shape = st_as_sfc(geos::geos_make_valid(Shape)))
+  
+  # table(check)
+  
+  invalids <- 
+    check |> 
+    tibble() |> 
+    rowid_to_column() |> 
+    filter(check != 'Valid Geometry')
+  
+  # pull out the broken ones and fix
+  tic(); nwi_fix <-
+    nwi |> 
+    filter(rowid %in% invalids$rowid) |> 
+    st_make_valid() |> 
+    st_buffer(0); toc()#|> mapview()
+  
+  # set working ones aside
+  tic(); nwi_valid <- 
+    nwi |> 
+    anti_join(invalids, by = 'rowid'); toc() # ~12 mins
+  
+  # # drop the invalids, bind the fixed invalids back on
+  # tic(); nwi <-
+  #   nwi |> 
+  #   anti_join(invalids, by = 'rowid') |> 
+  #   # filter(rowid %nin% invalids$rowid) |> # NOT IN
+  #   bind_rows(nwi_fix); toc()
+
+  beepr::beep()
+  
+  # reduce clipper
+  clipper_geom_temp <- clipper_geom |> filter(state == i)
+  
+  # intersect working ones
+  tic(); nwi_int <- 
+    st_parallel(
+      nwi
+        # nwi_valid |> st_make_valid()
+      , st_intersection
+      , ncore
+      , clipper_geom_temp # pre-selection, saves SOOO much time.
+      ) |> 
+    # mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
+    select(wetland_type, state) |> 
+    filter(st_is(geometry, c('POLYGON', 'MULTIPOLYGON'))); toc(); beepr::beep() # drop linestrings, if any
+  
+  # intersect previously broken ones
+    tic(); nwi_int_fix <- 
+    st_parallel(
+      # nwi
+        nwi_fix
+      , st_intersection
+      , ncore
+      , clipper_geom_temp # pre-selection, saves SOOO much time.
+      ) |> 
+    # mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
+    select(wetland_type, state) |> 
+    filter(st_is(Shape, c('POLYGON', 'MULTIPOLYGON'))) |> 
+      st_cast('POLLYGON'); toc(); beepr::beep() # drop linestrings, if any
+    
+    # combine
+    nwi_int |> 
+      bind_rows(nwi_int_fix) |> 
+      st_write_parquet(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_clipped/', i, '_nwi.parquet')); toc()
+    # st_write(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_clipped/', i, '_nwi.gpkg')); toc()
   
   beepr::beep()
   
   clipped_nwi <- 
-    st_read(
-      paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_clipped/', i, '_nwi.gpkg')
+    st_read_parquet(
+      paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_clipped/', i, '_nwi.parquet')
+    # st_read(
+    #   paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_clipped/', i, '_nwi.gpkg')
     ) |> 
     st_transform(crs = st_crs(holc))
   
@@ -424,8 +747,9 @@ tic(); for(i in states$value[c(32: 40)]){ # MI, MS, NY failed
   holc_temp <- 
     holc |> 
     # st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg') |> 
+    select(id, state) |> 
     filter(state == i) |> 
-    select(id, area_holc_km2)
+    select(id)
   
   beepr::beep()
   
@@ -434,8 +758,8 @@ tic(); for(i in states$value[c(32: 40)]){ # MI, MS, NY failed
     , st_intersection
     , ncore
     , holc_temp
-    ) |> 
-    # st_write(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_holc_int/', i, '_nwi.gpkg'))
+    ) %>%
+    mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
     st_drop_geometry() |> 
     group_by(id) |> 
     summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE)) |> 
