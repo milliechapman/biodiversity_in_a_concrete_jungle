@@ -485,8 +485,7 @@ rm(msa)
 ```
 
 
-# 5 bring in a state, clip its water down, save out (just cuz), read back in and summarize per holc poly
-TODO add other (NON-HOLC) polygons
+# 5 bring in a state, clip its water down, save out (just cuz), and summarize per holc poly, UA, and MSA
 ```{r}
 
 
@@ -508,8 +507,6 @@ msa_ungraded <-
   st_transform(crs = st_crs(holc))
 
 
-
-
 parallelly::availableCores() # 16, yeah!
 ncore <- 8  # How many do you want to use?
 # ncore <- 4  # How many do you want to use?
@@ -517,6 +514,18 @@ ncore <- 8  # How many do you want to use?
 set.seed(1); gc()
 
 tic(); for(i in shapes_to_iterate_over$filenames){
+# tic(); for(i in shapes_to_iterate_over$filenames[20]){ # for testing a non-overlap
+# tic(); for(i in shapes_to_iterate_over$filenames[58:59]){ # skip WI_Wetlands_North?
+# tic(); for(i in shapes_to_iterate_over$filenames[57]){ # WI_Wetlands_North ONLY? - ack broken file
+
+# # WISCONSON is bad
+# tic(); for(i in shapes_to_iterate_over$filenames[57]){ # WI_Wetlands_North ONLY? - ack broken file
+# i <- '../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/WI_geodatabase_wetlands.gdb/'
+# st_code <- 'WI'
+# item <- 'WI_Wetlands'
+# nwi <- st_read(i, item) |> 
+#   select(wetland_type = WETLAND_TYPE)
+
   tic()
   print('==============================================================================================')
   print(i)
@@ -551,77 +560,206 @@ tic(); for(i in shapes_to_iterate_over$filenames){
       , clipper_geom_temp # pre-selection, saves SOOO much time.
       ) |> 
     select(wetland_type, state) |> 
-    filter(st_is(geometry, c('POLYGON', 'MULTIPOLYGON'))) |> # drop linestrings, if any
-    st_cast('POLYGON') 
+    filter(st_is(geometry, c('POLYGON', 'MULTIPOLYGON'))) # drop linestrings, if any
+    # st_cast('POLYGON') # causing more warnings then preventing?
   
   # free up some memory
   rm(nwi)
   
-  # write out clipped parquet file of
-  clipped_nwi |> 
-    st_write_parquet(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_clipped/', item, '_nwi.parquet')); toc(); beep() 
-  
-  # clipped nwi reproject to match holc polys
-  tic(); clipped_nwi <- 
+  # IF THERE IS OVERLAP
+  # write out clipped parquet file
+  if(nrow(clipped_nwi) > 0){
     clipped_nwi |> 
-    st_transform(crs = st_crs(holc)); toc(); beep()
+      st_write_parquet(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_clipped/'
+                              , item
+                              , '_nwi.parquet')); toc(); beep()
+    
+    # reproject clipped nwi to match holc polys
+    tic(); clipped_nwi <- 
+      clipped_nwi |> 
+      st_transform(crs = st_crs(holc)); toc(); beep()
+    
+    # read in reduced holc polygons
+    holc_temp <- 
+      holc |>
+      select(id, state) |> 
+      filter(state == st_code) |> 
+      select(id)
+    
+    # intersect clipped nwi with holc polygons, calculate overlap per poly AND per type of wetland
+    if(nrow(clipped_nwi) < ncore){
+      holc_nwi_int <- 
+        clipped_nwi |> 
+        st_intersection(holc_temp) %>% 
+        mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
+        st_drop_geometry() |> 
+        group_by(id, wetland_type) |> # holc polygon AND by wetland type
+        summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE))
+    } else{
+      tic(); holc_nwi_int <- 
+        st_parallel(
+            clipped_nwi
+          , st_intersection
+          , ncore
+          , holc_temp
+          ) %>%
+        mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
+        st_drop_geometry() |> 
+        group_by(id, wetland_type) |> # holc polygon AND by wetland type
+        summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE)); toc()
+      }
+    
+    
+    # IF there is a holc-nwi intersection, save it out
+    if(nrow(holc_nwi_int) > 0){
+      holc_nwi_int |> 
+      write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/holc_'
+                       , item
+                       , '_nwi.csv')); beep()
+      }; rm(holc_nwi_int)
+    
+    
+    # URBAN AREA polygons, calculate overlap per poly AND per type of wetland
+    if(nrow(clipped_nwi) < ncore){ # could have been combined with above
+      ua_nwi_int <- 
+        clipped_nwi |> 
+        st_intersection(ua_ungraded) %>%
+        mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
+        st_drop_geometry() |> 
+        group_by(ua_GEOID, wetland_type) |> # ua polygon AND by wetland type
+        summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE))
+    } else{
+      tic(); ua_nwi_int <- 
+        st_parallel(
+            clipped_nwi
+          , st_intersection
+          , ncore
+          , ua_ungraded
+          ) %>%
+        mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
+        st_drop_geometry() |> 
+        group_by(ua_GEOID, wetland_type) |> # ua polygon AND by wetland type
+        summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE)); toc()
+    }
+    
+    # IF there is a ua-nwi intersection, save it out
+    if(nrow(ua_nwi_int) > 0){
+      ua_nwi_int |> 
+      write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/ua_'
+                       , item
+                       , '_nwi.csv')); beep()
+      }; rm(ua_nwi_int)
+    
+    # MSA polygons, calculate overlap per poly AND per type of wetland
+    if(nrow(clipped_nwi) < ncore){ # could have been combined with above
+      msa_nwi_int <- 
+        clipped_nwi |> 
+        st_intersection(msa_ungraded) %>%
+        mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
+        st_drop_geometry() |> 
+        group_by(msa_GEOID, wetland_type) |> # ua polygon AND by wetland type
+        summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE))
+    } else{
+    tic(); msa_nwi_int <-
+      st_parallel(
+          clipped_nwi
+        , st_intersection
+        , ncore
+        , msa_ungraded
+        ) %>%
+      mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
+      st_drop_geometry() |> 
+      group_by(msa_GEOID, wetland_type) |> # msa polygon AND by wetland type
+      summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE)); toc()
+    }
+    
+    # IF there is an msa-nwi intersection, save it out
+    if(nrow(msa_nwi_int) > 0){
+      msa_nwi_int |> 
+      write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/msa_'
+                       , item
+                       , '_nwi.csv')); beep()
+    }; rm(msa_nwi_int)
+    
+    }; toc(); beep() # ends first if with no overlapping clipped_nwi
   
-  # read in reduced holc polygons
-  holc_temp <- 
-    holc |>
-    select(id, state) |> 
-    filter(state == st_code) |> 
-    select(id)
-  
-  # intersect clipped nwi with holc polygons, calculate overlap per poly AND per type of wetland
-  tic(); st_parallel(
-      clipped_nwi
-    , st_intersection
-    , ncore
-    , holc_temp
-    ) %>%
-    mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
-    st_drop_geometry() |> 
-    group_by(id, wetland_type) |> # holc polygon AND by wetland type
-    summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE)) |> 
-    write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/holc_', item, '_nwi.csv')); toc(); beep()
-  
-  # URBAN AREA polygons, calculate overlap per poly AND per type of wetland
-  tic(); st_parallel(
-      clipped_nwi
-    , st_intersection
-    , ncore
-    , ua_ungraded
-    ) %>%
-    mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
-    st_drop_geometry() |> 
-    group_by(ua_GEOID, wetland_type) |> # msa polygon AND by wetland type
-    summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE)) |> 
-    write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/ua_', item, '_nwi.csv')); toc(); beep()
-  
-  # MSA polygons, calculate overlap per poly AND per type of wetland
-  tic(); st_parallel(
-      clipped_nwi
-    , st_intersection
-    , ncore
-    , msa_ungraded
-    ) %>%
-    mutate(area_nwi_km2 = as.double(st_area(.) / 1000000)) |> 
-    st_drop_geometry() |> 
-    group_by(msa_GEOID, wetland_type) |> # msa polygon AND by wetland type
-    summarise(sum_area_nwi_km2 = sum(area_nwi_km2, na.rm = TRUE)) |> 
-    write_csv(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/msa_', item, '_nwi.csv')); toc(); beep()
-  
-  toc(); beep()
-  gc()
-}; toc()
-
+  rm(clipped_nwi); gc()
+  }; toc()
 
 
 ```
 
-old and ewwwey
+# remove the large files ARE YOU SURE YOU WANT TO DO THIS?!?!?
+```{r eval=FALSE, include=FALSE}
 
+# list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands')
+# file.remove('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands/')
+# for(i in list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands'
+#                     , full.names = TRUE
+#                     , recursive = TRUE)){
+#   file.remove(i)
+# }
+
+```
+
+start here!
+# 6 pull HOLC, UA, MSA summaries together
+```{r}
+
+nwi_long <- 
+  tibble(filenames = 
+           list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/'
+                      , full.names = TRUE
+                      )) |> 
+  mutate(file = map(filenames, ~read_csv(., col_types = 'ccd'))) |> # define types!
+  select(-filenames) |> 
+  unnest(file) |> 
+  select(id, ua_GEOID, msa_GEOID, everything()) |> # just reorder columns: keys then vals
+  pivot_longer(cols = c(id, ua_GEOID, msa_GEOID)) |> 
+  group_by(name, value, wetland_type) |> # squish down because of overlaps
+  summarise(sum_area_nwi_km2 = sum(sum_area_nwi_km2)) |> 
+  ungroup() 
+  
+
+nwi_wide <- 
+  nwi_long |> 
+  pivot_wider(id_cols = c(name, value)
+              , names_from = wetland_type
+              , values_from = sum_area_nwi_km2
+              , values_fill = 0
+              ) |> 
+  mutate(
+    nwi_total_area_km2 = rowSums(across(where(is.double)))
+  )
+
+# save out
+nwi_wide |> 
+  write_csv('working_data/nwi/nwi_wide.csv')
+
+nwi_long |> 
+  write_csv('working_data/nwi/nwi_long.csv')
+
+nwi_wide |> 
+  ggplot(aes(nwi_total_area_km2)) +
+  geom_density() +
+  scale_x_log10() + 
+  facet_wrap(~name) +
+  NULL
+
+
+nwi_long |> 
+  ggplot(aes(sum_area_nwi_km2)) +
+  geom_density() +
+  scale_x_log10() + 
+  facet_grid(name ~ wetland_type) +
+  theme_bw(16) +
+  NULL
+
+```
+
+
+
+old and ewwwey - busted geometries in shapefiles
 ```{r}
 # tic(); for(i in states[c(1, 2),]){ # for testing
 # tic(); for(i in states$value){
