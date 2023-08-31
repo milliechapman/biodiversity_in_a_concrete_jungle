@@ -37,6 +37,7 @@ packs <- c(
   , 'tictoc'    # times things
   , 'beepr'     # makes noises
   , 'sfarrow'
+  , 'ggpubr'    # boxplots with significance testing.
 )
 
 
@@ -705,40 +706,45 @@ tic(); for(i in shapes_to_iterate_over$filenames){
 start here!
 # 6 pull HOLC, UA, MSA summaries together
 ```{r}
+# nwi_long <- 
+#   tibble(filenames = 
+#            list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/'
+#                       , full.names = TRUE
+#                       )) |> 
+#   mutate(file = map(filenames, ~read_csv(., col_types = 'ccd'))) |> # define types!
+#   select(-filenames) |> 
+#   unnest(file) |> 
+#   select(id, ua_GEOID, msa_GEOID, everything()) |> # just reorder columns: keys then vals
+#   pivot_longer(cols = c(id, ua_GEOID, msa_GEOID)) |> 
+#   group_by(name, value, wetland_type) |> # squish down because of overlaps
+#   summarise(sum_area_nwi_km2 = sum(sum_area_nwi_km2)) |> 
+#   ungroup() 
+#   
+# 
+# nwi_wide <- 
+#   nwi_long |> 
+#   pivot_wider(id_cols = c(name, value)
+#               , names_from = wetland_type
+#               , values_from = sum_area_nwi_km2
+#               , values_fill = 0
+#               ) |> 
+#   mutate(
+#     nwi_total_area_km2 = rowSums(across(where(is.double)))
+#   )
+# 
+# # save out
+# nwi_wide |> 
+#   write_csv('working_data/nwi/nwi_wide.csv')
+# 
+# nwi_long |> 
+#   write_csv('working_data/nwi/nwi_long.csv')
 
-nwi_long <- 
-  tibble(filenames = 
-           list.files('../biodiversity_in_a_concrete_jungle_data_too_big/wetlands_int/'
-                      , full.names = TRUE
-                      )) |> 
-  mutate(file = map(filenames, ~read_csv(., col_types = 'ccd'))) |> # define types!
-  select(-filenames) |> 
-  unnest(file) |> 
-  select(id, ua_GEOID, msa_GEOID, everything()) |> # just reorder columns: keys then vals
-  pivot_longer(cols = c(id, ua_GEOID, msa_GEOID)) |> 
-  group_by(name, value, wetland_type) |> # squish down because of overlaps
-  summarise(sum_area_nwi_km2 = sum(sum_area_nwi_km2)) |> 
-  ungroup() 
-  
+# read in NWI summaries
+nwi_wide <- read_csv('working_data/nwi/nwi_wide.csv')
 
-nwi_wide <- 
-  nwi_long |> 
-  pivot_wider(id_cols = c(name, value)
-              , names_from = wetland_type
-              , values_from = sum_area_nwi_km2
-              , values_fill = 0
-              ) |> 
-  mutate(
-    nwi_total_area_km2 = rowSums(across(where(is.double)))
-  )
+nwi_long <- read_csv('working_data/nwi/nwi_long.csv')
 
-# save out
-nwi_wide |> 
-  write_csv('working_data/nwi/nwi_wide.csv')
-
-nwi_long |> 
-  write_csv('working_data/nwi/nwi_long.csv')
-
+# ~log normal totals
 nwi_wide |> 
   ggplot(aes(nwi_total_area_km2)) +
   geom_density() +
@@ -746,7 +752,7 @@ nwi_wide |>
   facet_wrap(~name) +
   NULL
 
-
+# ~log normal by type
 nwi_long |> 
   ggplot(aes(sum_area_nwi_km2)) +
   geom_density() +
@@ -754,6 +760,187 @@ nwi_long |>
   facet_grid(name ~ wetland_type) +
   theme_bw(16) +
   NULL
+
+# NWI by HOLC
+holc <-
+  st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg') |> 
+  st_make_valid()
+
+holc_nwi <- 
+  holc |> 
+  left_join(
+    nwi_wide |> 
+      filter(name == 'id') |> 
+      rename(id = value) |> 
+      select(-name)
+    , by = 'id'
+      ) %>%
+  replace(is.na(.), 0)
+```
+
+## A VIZ
+### i cover
+```{r}
+
+
+holc_nwi |> 
+  ggplot(aes(holc_grade, nwi_total_area_km2)) +
+  geom_boxplot() + 
+  scale_y_log10()
+
+my_comparisons <- list(c("A", "B"), c("A", "C"), c("A", "D")
+                       # , c("A", "UA"), c("A", "MSA")
+                       )
+
+holc_nwi |> 
+  ggboxplot(x = 'holc_grade', y = 'nwi_total_area_km2'
+            , palette = holc_pal_f
+            , fill = 'holc_grade'
+             # , width = 0.12
+            # removing outliers
+            , outlier.color = NA
+            , ggtheme = theme_pubr(base_size = 16)) +
+  stat_compare_means(comparisons = my_comparisons
+                     , method = 'wilcox.test'
+                     , symnum.args = list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, Inf)
+                                          , symbols = c("****", "***", "**", "*", "ns"))
+                     ) +  # Add pairwise comparisons p-value
+  # scale_y_sqrt(labels = scales::label_log(digits = 2)) +
+  scale_y_log10(labels = scales::label_log(digits = 2)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = c(.9, .25)) +
+  labs(
+    x = '', y = 'total National Wetlands Inventory cover (km^2)') +
+  annotation_logticks(sides = 'l') +
+  # facet_wrap(~taxon, scales = 'free', nrow = 2) +
+  NULL
+
+
+# PERCENT cover
+holc_nwi |> 
+  mutate(p_nwi = 100*(nwi_total_area_km2 / area_holc_km2)) |> 
+  ggboxplot(x = 'holc_grade', y = 'p_nwi'
+            , palette = holc_pal_f
+            , fill = 'holc_grade'
+             # , width = 0.12
+            # removing outliers
+            , outlier.color = NA
+            , ggtheme = theme_pubr(base_size = 16)) +
+  stat_compare_means(comparisons = my_comparisons
+                     , method = 'wilcox.test'
+                     , symnum.args = list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, Inf)
+                                          , symbols = c("****", "***", "**", "*", "ns"))
+                     ) +  # Add pairwise comparisons p-value
+  # scale_y_sqrt(labels = scales::label_log(digits = 2)) +
+  scale_y_log10(labels = scales::label_log(digits = 2)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = c(.9, .25)) +
+  labs(
+    x = '', y = 'NWI coverage (% of polygon)') +
+  annotation_logticks(sides = 'l') +
+  # facet_wrap(~taxon, scales = 'free', nrow = 2) +
+  NULL
+
+# ggsave(  filename = paste0(getwd(), '/figures/p_NWI_', Sys.Date(), '.png')
+#        # , width = 8.7, height = 10, units = 'cm'
+#        , dpi = 450
+#        , scale = 1.65)
+
+
+
+```
+
+### ii cover by subtype
+```{r}
+
+ 
+my_comparisons <- list(c("A", "B"), c("A", "C"), c("A", "D")
+                       # , c("A", "UA"), c("A", "MSA")
+                       )
+
+
+# PERCENT cover
+holc_nwi |> 
+  st_drop_geometry() |> 
+  # https://dplyr.tidyverse.org/reference/across.html
+  mutate(across(`Freshwater Forested/Shrub Wetland` : nwi_total_area_km2, ~100*(.x / area_holc_km2))) |> 
+  select(id, holc_grade, `Freshwater Forested/Shrub Wetland` : nwi_total_area_km2) |> 
+  pivot_longer(`Freshwater Forested/Shrub Wetland` : nwi_total_area_km2) |> 
+  ggboxplot(x = 'holc_grade', y = 'value'
+            , palette = holc_pal_f
+            , fill = 'holc_grade'
+             # , width = 0.12
+            # removing outliers
+            , outlier.color = NA
+            # , ggtheme = theme_pubr(base_size = 16)
+            ) +
+  stat_compare_means(comparisons = my_comparisons
+                     , method = 'wilcox.test'
+                     , symnum.args = list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, Inf)
+                                          , symbols = c("****", "***", "**", "*", "ns"))
+                     ) +  # Add pairwise comparisons p-value
+  # scale_y_sqrt(labels = scales::label_log(digits = 2)) +
+  scale_y_log10(labels = scales::label_log(digits = 2)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = c(.1, .25)) +
+  labs(
+    x = '', y = 'NWI coverage (% of polygon)') +
+  annotation_logticks(sides = 'l') +
+  facet_wrap(~name, scales = 'free', nrow = 2) +
+  NULL
+
+# ggsave(  filename = paste0(getwd(), '/figures/p_NWI_types_', Sys.Date(), '.png')
+#        # , width = 8.7, height = 10, units = 'cm'
+#        , dpi = 450
+#        , scale = 1.65)
+
+
+
+```
+
+
+### iii NYC only
+```{r}
+
+ 
+my_comparisons <- list(c("A", "B"), c("A", "C"), c("A", "D")
+                       # , c("A", "UA"), c("A", "MSA")
+                       )
+
+# PERCENT cover
+nyc_cities <- c('Bronx', 'Brooklyn', 'Manhattan', 'Queens', 'Staten Island')
+holc_nwi |> 
+  st_drop_geometry() |> 
+  filter(city %in% nyc_cities) |> # tabyl(city)
+  # https://dplyr.tidyverse.org/reference/across.html
+  mutate(across(`Freshwater Forested/Shrub Wetland` : nwi_total_area_km2, ~100*(.x / area_holc_km2))) |> 
+  select(id, holc_grade, `Freshwater Forested/Shrub Wetland` : nwi_total_area_km2) |> 
+  pivot_longer(`Freshwater Forested/Shrub Wetland` : nwi_total_area_km2) |> 
+  ggboxplot(x = 'holc_grade', y = 'value'
+            , palette = holc_pal_f
+            , fill = 'holc_grade'
+             # , width = 0.12
+            # removing outliers
+            , outlier.color = NA
+            # , ggtheme = theme_pubr(base_size = 16)
+            ) +
+  stat_compare_means(comparisons = my_comparisons
+                     , method = 'wilcox.test'
+                     , symnum.args = list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, Inf)
+                                          , symbols = c("****", "***", "**", "*", "ns"))
+                     ) +  # Add pairwise comparisons p-value
+  # scale_y_sqrt(labels = scales::label_log(digits = 2)) +
+  scale_y_log10(labels = scales::label_log(digits = 2)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = c(.1, .25)) +
+  labs(
+    x = '', y = 'NWI coverage (% of polygon)') +
+  annotation_logticks(sides = 'l') +
+  facet_wrap(~name, scales = 'free', nrow = 2) +
+  NULL
+
+# ggsave(  filename = paste0(getwd(), '/figures/p_NWI_types_NYC_', Sys.Date(), '.png')
+#        # , width = 8.7, height = 10, units = 'cm'
+#        , dpi = 450
+#        , scale = 1.65)
+
+
 
 ```
 
