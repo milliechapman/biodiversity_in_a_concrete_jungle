@@ -140,33 +140,41 @@ ndvi # totally rules!
 
 ndvi |> arrange(id)
 
-ndvi_summs <- 
+holc_ndvi_summs <- 
   ndvi |> 
   # mutate(id = str_squish(id)) |> 
   group_by(id) |>
   summarise(mean_ndvi = mean(mean))
 
-# what does NOT join?
-(not_joined <- holc |> anti_join(ndvi_summs, by = 'id'))
+holc |> #anti_join(ndvi_summs, by = 'id') # fails perfect!
+  left_join(holc_ndvi_summs, by = 'id')
 
-not_joined |>
-  st_collection_extract() |> 
-  sample_n(1) |> 
-  mapview()
+# write out
+holc_ndvi_summs |> 
+  write_csv('working_data/ndvi_holc.csv')
 
-holc |> 
-  filter(id %in% not_joined$id) |> 
-  st_collection_extract() |> 
-  sample_n(1) |> 
-  mapview()
 
-holc |> 
-  mutate(id = str_squish(id)) |> 
-  left_join(not_joined |> 
-              st_drop_geometry() |> 
-              mutate(id = str_squish(id))
-            , by = 'id'
-            )
+# # what does NOT join?
+# (not_joined <- holc |> anti_join(ndvi_summs, by = 'id'))
+# 
+# not_joined |>
+#   st_collection_extract() |> 
+#   sample_n(1) |> 
+#   mapview()
+# 
+# holc |> 
+#   filter(id %in% not_joined$id) |> 
+#   st_collection_extract() |> 
+#   sample_n(1) |> 
+#   mapview()
+# 
+# holc |> 
+#   mutate(id = str_squish(id)) |> 
+#   left_join(not_joined |> 
+#               st_drop_geometry() |> 
+#               mutate(id = str_squish(id))
+#             , by = 'id'
+#             )
 
 ```
 
@@ -181,18 +189,18 @@ msau <- st_read('working_data/MSA_donut/msa_ungraded.gpkg')
 msa |> anti_join(msau |> st_drop_geometry()) # yes!
 
 # checks
-ndvi |> group_by(m_GEOID, unit) |> count()
-ndvi |> group_by(m_GEOID, unit) |> count() |> summary()
-ndvi |> group_by(m_GEOID, unit) |> count() |> tail()
+ndvi |> group_by(msa_GEOID, unit) |> count()
+ndvi |> group_by(msa_GEOID, unit) |> count() |> summary()
+ndvi |> group_by(msa_GEOID, unit) |> count() |> tail()
 
 (
   msa_ndvi_summ <- 
     ndvi |> 
     filter(unit == 'msa' | unit == 'msau') |> 
-    group_by(m_GEOID, unit) |> 
+    group_by(msa_GEOID, unit) |> 
     summarise(mean_ndvi = mean(mean, na.rm = TRUE)) |> 
-    mutate(msa_GEOID = as.character(m_GEOID)) |> 
-    select(-m_GEOID)
+    mutate(msa_GEOID = as.character(msa_GEOID)) |> 
+    select(-msa_GEOID)
   )
 
 # check the joins
@@ -227,15 +235,15 @@ uau  <- st_read('working_data/UA_donut/UA_ungraded_2023-01-23 16-05-42.gpkg')
 ua |> anti_join(uau |> st_drop_geometry()) # yes!
 
 # checks
-ndvi |> group_by(GEOID, unit) |> count()
-ndvi |> group_by(GEOID, unit) |> count() |> summary()
-ndvi |> group_by(GEOID, unit) |> count() |> tail()
+ndvi |> group_by(ua_GEOID, unit) |> count()
+ndvi |> group_by(ua_GEOID, unit) |> count() |> summary()
+ndvi |> group_by(ua_GEOID, unit) |> count() |> tail()
 
 (
   ua_ndvi_summ <- 
     ndvi |> 
     filter(unit == 'ua' | unit == 'uau') |> 
-    group_by(GEOID, unit) |> 
+    group_by(ua_GEOID, unit) |> 
     summarise(mean_ndvi = mean(mean, na.rm = TRUE))
   )
 
@@ -245,14 +253,14 @@ ndvi |> group_by(GEOID, unit) |> count() |> tail()
 ua |> 
   left_join(
     ua_ndvi_summ |> filter(unit == 'ua')
-    , by = 'GEOID'
+    , by = c('GEOID' = 'ua_GEOID')
     )
 
 # UA erased
 uau |> 
   left_join(
     ua_ndvi_summ |> filter(unit == 'uau')
-    , by = 'GEOID'
+    , by = c('GEOID' = 'ua_GEOID')
     )
 
 # write out

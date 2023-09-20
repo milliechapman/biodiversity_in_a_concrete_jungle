@@ -13,6 +13,9 @@ Millie, to redo NDVI per HOLC polygons.
 
 do boxplots with significance per taxon.
   or via nesting.
+  
+  dichotomize NWI water?
+  
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -203,7 +206,7 @@ ua_comp |> group_by(ua_GEOID) |> count()
 
 
 # mutate(holc_grade = factor(holc_grade, levels = c('A', 'B', 'C', 'D', 'UA', 'MSA')))
-
+# TODO retain keys, save out
 comp <- 
   bind_rows(holc_comp |> select(-id), msa_comp, ua_comp) |> 
   drop_na(taxon) |> 
@@ -228,6 +231,9 @@ comp |> tabyl(holc_grade)
 comp |> tabyl(holc_grade, taxon)
 comp |> tabyl(holc_grade, taxon, level) |> bind_rows(.id = 'level') |> tibble() # HANDSOME TABLE!
 ```
+
+TODO make viz and models script
+TODO load data.
 
 # 2 viz w boxplots
 ## A Density
