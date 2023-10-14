@@ -1,0 +1,191 @@
+---
+title: "09_population_density"
+author: "Dexter H. Locke, PhD"
+date: "`r format(Sys.time())`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# 0 set up: load libraries, custom functions, set defaults
+```{r}
+
+# load libraries
+# packages we'll be using
+packs <- c(
+    'tidyverse'  # a must have
+  , 'tidylog'         # makes things very verbose for 2x checking
+  , 'gbifdb' # GBIF
+  , 'fst' # a faster table, makes outputs files much smaller, too.
+  # , 'terra'
+  , 'sf'              # spatial support
+  , 'mapview'         # webmaps
+  , 'janitor'   # cleans things up, also pipe-friendly cross-tabulations
+  , 'tictoc'          # times things
+  , 'beepr'           # makes noises
+  , 'tidycensus'# for accessing Census and ACS data
+)
+
+
+# check for all of the libraries, install if you don't have them
+if (length(setdiff(packs, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packs, rownames(installed.packages())))  
+}
+
+# load them
+vapply(packs, library, character.only = TRUE, logical(1), logical.return = TRUE, quietly = TRUE)
+
+
+
+# fixes mapview
+mapviewOptions(fgb = FALSE)
+
+
+sf_use_s2(FALSE) # fixes intersection problems. 
+```
+
+
+# 1 read in HOLC polygons
+```{r}
+
+(holc <- st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg', as_tibble = TRUE) |> 
+    filter(st_is(geom, 'POLYGON')) |> 
+    select(id, area_holc_km2)
+)
+
+```
+
+
+# 2 read in Census polygons
+```{r}
+
+# read in the census block groups (single part, no water) in those MSAs that have HOLC polygons
+(cbgs_in_msa <- st_read('../int_data/cbgs_in_msa/cbgs_in_msa_2022-01-03 06-40-20.shp'
+                        , as_tibble = TRUE
+                        ) |> 
+  select(
+      cbg_GEOID = c_GEOID
+    , area_cbg_km2 = ar_cb_2
+    , area_single_km2 = ar_sn_2
+    , area_multi_prop = ar_mlt_
+    , state
+    # , area_weighted_km2 = ar_wg_2
+    # , msa_GEOID = m_GEOID
+    # , msa_name = msa_nam
+    ))
+
+# cbg_GEOID repeats, A LOT, on purpose.. those multipart polygons
+cbgs_in_msa |> st_drop_geometry() |> distinct(cbg_GEOID)
+
+# confirm fractions add up to 1
+cbgs_in_msa |> 
+  st_drop_geometry() |> 
+  group_by(cbg_GEOID) |> 
+  summarise(total = sum(area_multi_prop)) |> 
+  summary() # all ones, success
+
+```
+
+
+# 3 query Census for population counts
+```{r}
+
+# isolate the states to query for population
+states_to_query <- 
+  cbgs_in_msa |> 
+  st_drop_geometry() |> 
+  distinct(state)
+
+# # query the Census API
+# tic(); ( # takes ~70 seconds (with TN cabin internat)
+#   cbg_tbl_pop <-
+#     get_acs(
+#       # state = 'RI' # used for testing, ~1 second, what a time to be alive
+#       state = states_to_query$state
+#       , geography = 'block group'
+#       , variables = 'B01001_001' # population
+#       , year = 2019
+#       , output = 'tidy'
+#       , geometry = FALSE
+#       , keep_geo_vars = FALSE
+#       , moe_level = 95
+#       ) |>
+#     select(-NAME) |>
+#     rename(cbg_GEOID = GEOID)
+#   ); toc()
+# 
+# 
+# # give each cbg in msa's with HOLC their population counts via tabular join
+# cbgs_in_msa |>
+#   # st_drop_geometry() |>
+#   left_join(cbg_tbl_pop, by = 'cbg_GEOID') |>           # tabular hand-ff
+#   mutate(est_population = estimate*area_multi_prop) |>  # cut population down by multipart fraction
+#   select(cbg_GEOID, est_population) |> # drop weight
+#   drop_na(est_population) |>                            # drop the non-matches / a double check
+#   st_write(paste0('../biodiversity_in_a_concrete_jungle_data_too_big/cbg_w_pop_', # write it out
+#                    gsub('[[:punct:]]', '-', Sys.time()), '.gpkg'))
+
+# read in
+(cbg_w_pop <- 
+    st_read('../biodiversity_in_a_concrete_jungle_data_too_big/cbg_w_pop_2023-10-12 09-55-20.gpkg'
+            , as_tibble = TRUE))
+
+```
+
+
+# 4 intersect cbgs with HOLC
+```{r}
+
+tic(); (
+  holc_cbg_int <- 
+    st_intersection(holc, cbg_w_pop) %>% 
+    mutate(  int_area_km = as.double(st_area(.) / 1e+6)
+           , prop_in = int_area_km / area_holc_km2
+           , w_estimate = est_population * prop_in
+           )
+  ); toc() # ~20 seconds
+
+# 2x checks
+holc_cbg_int |> ggplot(aes(prop_in)) + geom_density()
+holc_cbg_int |> summary()
+
+```
+
+
+# 5 sum up the pieces
+```{r}
+
+(pop_per_holc <- 
+  holc_cbg_int |> 
+  st_drop_geometry() |> 
+  group_by(id) |> 
+  summarise(population_est = sum(w_estimate))
+)
+
+```
+
+# 6 join to test and save out
+```{r}
+
+test_join <- 
+  holc |> 
+  left_join(pop_per_holc, by = 'id')
+
+test_join |> filter(is.na(population_est)) |> mapview() # set those to zero later!
+
+test_join |> mapview(zcol = 'population_est')
+
+# pop_per_holc |> 
+#   write_csv('working_data/population_from_census/pop_per_holc.csv')
+
+```
+
+
+## End

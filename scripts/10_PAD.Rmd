@@ -1,0 +1,178 @@
+---
+title: "10_PAD"
+author: "Dexter H. Locke, PhD"
+date: "`r format(Sys.time())`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# 0 set up: load libraries, custom functions, set defaults
+```{r}
+
+# load libraries
+# packages we'll be using
+packs <- c(
+    'tidyverse'  # a must have
+  , 'tidylog'         # makes things very verbose for 2x checking
+  , 'sf'              # spatial support
+  , 'mapview'         # webmaps
+  , 'janitor'   # cleans things up, also pipe-friendly cross-tabulations
+  , 'tictoc'          # times things
+  , 'beepr'           # makes noises
+)
+
+
+# check for all of the libraries, install if you don't have them
+if (length(setdiff(packs, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packs, rownames(installed.packages())))  
+}
+
+# load them
+vapply(packs, library, character.only = TRUE, logical(1), logical.return = TRUE, quietly = TRUE)
+
+
+
+# fixes mapview
+mapviewOptions(fgb = FALSE)
+
+
+sf_use_s2(FALSE) # fixes intersection problems. 
+```
+
+
+# 1 read in HOLC polygons
+```{r}
+
+(holc <- st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg', as_tibble = TRUE) |> 
+    filter(st_is(geom, 'POLYGON')) |> 
+    select(id, area_holc_km2)
+)
+
+```
+
+
+# 2 read in PAD polygons
+```{r}
+
+# isolate the states to draw from..
+states_to_query <-
+  st_read('../int_data/cbgs_in_msa/cbgs_in_msa_2022-01-03 06-40-20.shp'
+          , as_tibble = TRUE
+          )  |> 
+  st_drop_geometry() |> 
+  distinct(state)
+
+tic(); padusar <- 
+  st_read('../biodiversity_in_a_concrete_jungle_data_too_big/padus_ar.gpkg') |> 
+  filter(State_Nm %in% states_to_query$state) |> # exclude states we don't need.. (SQL would have been faster)
+  st_make_valid() |>
+  st_cast('MULTIPOLYGON') |> # I need this for whatever reason
+  st_cast('POLYGON') |> 
+  rowid_to_column(var = 'padusar_id') |> 
+  select(padusar_id) |> 
+  st_transform(st_crs(holc)); toc(); beep() # ~300 seconds
+
+
+```
+
+
+
+# 3 intersect cbgs with HOLC
+```{r}
+
+tic(); (
+  holc_padusar_int <- 
+    st_intersection(holc, padusar) %>% 
+    mutate(  int_area_km = as.double(st_area(.) / 1e+6)
+           , pct_pad_cover = 100*(int_area_km / area_holc_km2)
+           # , w_estimate = est_population * prop_in
+           )
+  ); toc() # ~12 seconds, what a time to be alive!?!
+
+# 2x checks
+holc_padusar_int |> ggplot(aes(pct_pad_cover)) + geom_density()
+holc_padusar_int |> summary() # nice 0 to 100
+
+```
+
+
+# 4 sum up the pieces
+```{r}
+
+padusar_per_holc <- 
+  holc_padusar_int |> 
+  st_drop_geometry() |> 
+  group_by(id) |> 
+  summarise(pct_pad_cover = sum(pct_pad_cover)) |> 
+  mutate(pct_pad_cover = ifelse(pct_pad_cover > 100, 100, pct_pad_cover))
+
+padusar_per_holc |> summary() # 165% ?! not right
+
+padusar_per_holc |> arrange(desc(pct_pad_cover))
+
+# high_pad_ids <- padusar_per_holc |> filter(pct_pad_cover > 100) |> pull(id)# 
+# holc |> 
+#   filter(id %in% high_pad_ids) |> mapview()
+
+```
+
+# 5 join to test and save out
+```{r}
+
+test_join <- 
+  holc |> 
+  left_join(padusar_per_holc, by = 'id')
+
+test_join |> filter(is.na(pct_pad_cover)) |> mapview() # set those to zero later!
+
+test_join |> mapview(zcol = 'pct_pad_cover')
+
+# padusar_per_holc |>
+#   write_csv('working_data/pad_us_ar/padusar_per_holc.csv')
+
+```
+
+
+
+# 3 link holc to msa
+```{r}
+
+cbgs_msa_lookup
+
+```
+
+
+# 3 link holc to cbgs
+```{r}
+
+holc_with_msa_ids <- 
+  holc |> 
+  st_centroid() |> 
+  st_join(cbgs_in_msa |> select(msa_GEOID)) |> 
+  st_drop_geometry() |> 
+  group_by(city) |> # few just didn't line up..
+  fill(msa_GEOID, .direction = 'downup') |> 
+  ungroup() |> 
+  select(id, msa_GEOID)
+
+
+```
+
+
+
+
+bring in all spatial cbgs with water removoed
+filter down to just this list of holc-containing MSAs
+
+intersect block groups with holc and apportion population by fractional cover
+create population density per holc polygons
+
+## End
