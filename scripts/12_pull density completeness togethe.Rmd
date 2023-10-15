@@ -756,14 +756,18 @@ tic(); mods_preds <-
   unnest(AIC) |>
   group_by(taxon, level, dv) |> 
   arrange(AIC) |> 
-  slice(1) |> # keeps best fitting model per taxon, level, & dv. Never look at how close AICs are together
+  slice(1) |> # keeps best fitting model per taxon, level, & dv. Never look at how close AICs are together # slice_min() instead?
   ungroup() |> 
   mutate(preds = map(mods, ggpredict, 'holc_grade')) |> 
-  unnest(preds); toc(); beep() # ~6 seconds
+  unnest(preds) |> 
+  mutate(across(c(predicted, conf.low, conf.high), ~ifelse(dv == 'completeness', .x, exp(.x)))
+         ); toc(); beep() # ~7 seconds
+
 ```
 
 ## viz
 ```{r}
+
 # viz
 mods_preds |>
   mutate(y = factor(case_when( # better labels
@@ -786,7 +790,7 @@ mods_preds |>
   labs(x = 'HOLC Grades') +
   NULL
 
-ggsave(filename = paste0(getwd(), '/figures/mods_preds_', Sys.Date(), '.png')
+ggsave(filename = paste0(getwd(), '/figures/mods_preds_backtransformed_', Sys.Date(), '.png')
        , width = 8.7, height = 10, units = 'cm'
        , dpi = 450
        , scale = 1.65
