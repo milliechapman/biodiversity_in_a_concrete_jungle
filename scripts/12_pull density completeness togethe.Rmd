@@ -758,10 +758,11 @@ tic(); mods_preds <-
   arrange(AIC) |> 
   slice(1) |> # keeps best fitting model per taxon, level, & dv. Never look at how close AICs are together # slice_min() instead?
   ungroup() |> 
-  mutate(preds = map(mods, ggpredict, 'holc_grade')) |> 
-  unnest(preds) |> 
-  mutate(across(c(predicted, conf.low, conf.high), ~ifelse(dv == 'completeness', .x, exp(.x)))
-         ); toc(); beep() # ~7 seconds
+  mutate(  preds = map(mods, ggpredict, 'holc_grade')
+         , sigs = map(mods, hypothesis_test, 'holc_grade') # this is slow.
+         , sigs = map(sigs, ~filter(.x, holc_grade == 'A-D' | holc_grade == 'D-A')) # only keep A-D
+         ); toc(); beep() # ~13 seconds
+
 
 ```
 
@@ -769,8 +770,11 @@ tic(); mods_preds <-
 ```{r}
 
 # viz
-mods_preds |>
-  mutate(y = factor(case_when( # better labels
+fig_1 <- 
+  mods_preds |>
+  unnest(preds) |> 
+  mutate(across(c(predicted, conf.low, conf.high), ~ifelse(dv == 'completeness', .x, exp(.x)))) |> 
+  mutate(dv = factor(case_when( # better labels
       dv == 'density'      ~ 'Sampling Density'
     , dv == 'completeness' ~ 'Estimated Completeness (%)'
     , dv == 'richness'     ~ 'Expected Species Richness'
@@ -784,13 +788,71 @@ mods_preds |>
   # facet_grid(rows = vars(taxon), cols = vars(level), scales = 'free') # separates family/species: no bueno
   # facet_grid(rows = vars(taxon), cols = vars(dv), scales = 'free') # vertical axes are shared, squishes some density and richness
   scale_color_viridis_d(option = 'A', begin = .25, end = .75) +
-  facet_grid(rows = vars(y), cols = vars(taxon), scales = 'free') +
+  facet_grid(dv ~ taxon, scales = 'free') +
   theme_bw(11) +
   theme(legend.position = 'bottom', legend.title = element_blank()) +
   labs(x = 'HOLC Grades') +
   NULL
 
-ggsave(filename = paste0(getwd(), '/figures/mods_preds_backtransformed_', Sys.Date(), '.png')
+sig_labs <- 
+  mods_preds |> 
+  select(taxon, level, dv, sigs) |> 
+  unnest(sigs) |>
+  mutate(y_ann = as.numeric(
+    case_when(
+      dv == 'density'       & level != 'family' ~ '115'
+    , dv == 'density'       & level == 'family' ~ '105'
+    , dv == 'completeness'  & level != 'family' ~ '60'
+    , dv == 'completeness'  & level == 'family' ~ '57'
+    , dv == 'richness'      & level != 'family' ~ '80'
+    , dv == 'richness'      & level == 'family' ~ '72'
+    , TRUE ~ 'ERROR'
+    ))
+    , dv = factor(case_when( # better labels
+      dv == 'density'      ~ 'Sampling Density'
+    , dv == 'completeness' ~ 'Estimated Completeness (%)'
+    , dv == 'richness'     ~ 'Expected Species Richness'
+    , TRUE ~ 'ERROR'
+    ), levels = c('Sampling Density', 'Estimated Completeness (%)', 'Expected Species Richness'))
+    , level = factor(level, levels = c('species', 'family'))
+    # , p_val = round(p.value, 2)
+    , p_val = cut(  p.value
+                  , breaks = c(0, 0.0001, 0.001, 0.01, 0.05, Inf)
+                  , labels = c("****", "***", "**", "*", "ns"))
+    ) |>
+  arrange(dv)
+
+sig_labs |> data.frame()
+
+fig_1 + 
+  geom_text(data = sig_labs, aes(x = 2.5, y = y_ann, label = p_val), show.legend = FALSE) +
+  geom_segment(data = sig_labs, aes(x = 1.15, xend = 3.85, y = y_ann - 2, yend = y_ann - 2)) +
+  NULL
+
+# # example/test 
+# # https://stackoverflow.com/questions/11889625/annotating-text-on-individual-facet-in-ggplot2
+# fig_1 + 
+#   geom_text(x = 2,  y = 38, 
+#            label = "***", 
+#            colour = "black") +
+#   # geom_segment(x = 1.75, xend = 1.75,
+#   #          y = 36, yend = 37,
+#   #          colour = "black") +
+#   # geom_segment(x = 2.25, xend = 2.25,
+#   #          y = 36, yend = 37,
+#   #          colour = "black") +
+#   # geom_segment(x = 1.75, xend = 2.25,
+#   #          y = 37, yend = 37,
+#   #          colour = "black") +
+#   # geom_segment(x = 1, xend = 4,
+#   #              y = 110, yend = 110,
+#   #              colour = "black") +
+#  geom_segment(x = 1, xend = 4,
+#                y = 110, yend = 110,
+#                colour = "black") +
+#     NULL
+
+ggsave(  filename = paste0(getwd(), '/figures/mods_preds_backtransformed_pvals_', Sys.Date(), '.png')
        , width = 8.7, height = 10, units = 'cm'
        , dpi = 450
        , scale = 1.65
