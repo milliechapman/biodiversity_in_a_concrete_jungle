@@ -269,7 +269,7 @@ comp |>
 TODO make viz and models script
 TODO load data.
 
-## B population density - REDO new keys
+## B population density
 ```{r}
 
 (pop_per_holc <- read_csv('working_data/population_from_census/pop_per_holc.csv'))
@@ -422,6 +422,7 @@ holc |>
 # # save out
 # save(nested_data, file = paste0('working_data/nested_data/nested_data_', Sys.Date(), '.RData'))
 
+load('working_data/nested_data/nested_data_2023-10-13.RData')
 
 # why the NAs?
 holc_comp |>
@@ -433,15 +434,18 @@ holc_comp |>
 holc_na_taxon <- holc_comp |> filter(is.na(taxon)) |> distinct(id)
 holc |> filter(id %in% holc_na_taxon$id) |> mapview()
 
+
 # normality of expected richness?
 nested_data |> # unnest(data) |> droplevels() |> group_by(taxon, level) |> nest() |> 
   drop_na() |> 
   unnest(data) |> 
   ungroup() |> 
-  select(taxon : id, expected_richness) |> 
-  ggplot(aes(expected_richness)) + 
+  # select(taxon : id, expected_richness) |> 
+  # ggplot(aes(expected_richness)) + 
+  select(taxon : id, log_richness) |> 
+  ggplot(aes(log_richness)) + 
   geom_density() +
-  scale_x_log10() +
+  # scale_x_log10() +
   facet_grid(rows = vars(taxon), cols = vars(level), scales = 'free')
 
 # completeness?
@@ -672,7 +676,9 @@ comp |>
 ```
 
 # 3 multivariate analyses
+## A fit models
 ```{r}
+
 load('working_data/nested_data/nested_data_2023-10-13.RData')
 
 nested_data # why those NAs?
@@ -767,7 +773,7 @@ tic(); mods_preds <-
 
 ```
 
-## viz: facet grid
+### viz: facet grid
 ```{r}
 
 # viz
@@ -907,7 +913,7 @@ ggsave(  filename = paste0(getwd(), '/figures/mods_preds_backtransformed_pvals_'
 
 ```
 
-## viz: each dependent variable as its own fig, bound together with patchwork
+### viz: each dependent variable as its own fig, bound together with patchwork
 ```{r}
 
 sig_labs2 <- 
@@ -1077,6 +1083,253 @@ ggsave(  filename = paste0(getwd(), '/figures/mods_preds_backtransformed_pvals_a
        )
 
 ```
+
+## B Ecorgegions
+```{r}
+load('working_data/nested_data/nested_data_2023-10-13.RData')
+
+nested_data # why those NAs?(!)
+
+(msa_eco <-
+    # read_csv('working_data/msa_ecoregion_level_2_keys_2023-11-01.csv'
+    read_csv('working_data/msa_ecoregion_level_1_keys_2023-11-01.csv'
+               , col_types = 'cc')
+  )
+
+
+msa_eco |> tabyl(NA_L1NAME)
+
+nested_data$data[[1]]
+levels(nested_data$data[[1]]$holc_grade)
+
+nested_data$data[[1]] |> glimpse()
+
+
+tic(); mods_eco_preds <-
+  nested_data |> 
+  drop_na() |> 
+  unnest(data) |>
+  ungroup() |> 
+  left_join(msa_eco, by = 'msa_GEOID') |> 
+  pivot_longer(
+      cols = c(log_density : log_richness)
+    , names_to = 'dv'
+    , values_to = 'dep_var') |>
+  drop_na(dep_var) |> 
+  group_by(taxon, level, dv, NA_L1NAME) |> 
+  tidylog::mutate(across(pop_per_km : pct_water, ~as.numeric(scale(.x)))) |> # scale numeric predictors
+  droplevels() |>
+  mutate(n_holc_levels = n_distinct(holc_grade),
+         # n_msa_levels = n_distinct(msa_GEOID)
+         ) |> 
+  filter(n_holc_levels > 1) |>
+  # filter(n_msa_levels > 1) |>
+  nest() |> 
+  tidylog::mutate(
+    # sampling density
+      mods = map(data, ~lm(dep_var ~ holc_grade, .x))
+    # , mix_mod_density_min = map(data, ~lmer(dep_var ~ holc_grade + (1 | msa_GEOID), .x))
+    # , mix_mod_density_max = map(data, ~lmer(dep_var ~ holc_grade + pop_per_km + mean_ndvi + pct_pad_cover + pct_water + (1 | msa_GEOID), .x))
+    , preds = map(mods, ggpredict, 'holc_grade')
+    , sigs = map(mods, hypothesis_test, 'holc_grade') # this is slow.
+    , sigs = map(sigs, ~filter(.x, holc_grade == 'A-D' | holc_grade == 'D-A')) # only keep A-D
+    ); toc(); beep() # ~26 seconds
+
+
+mods_eco_preds |> 
+  
+```
+
+
+### viz: each dependent variable as its own fig
+#### Sampling Density
+```{r}
+
+ preds_eco <- 
+  mods_eco_preds |>
+  select(taxon, level, ecoregion = NA_L1NAME, dv, preds, sigs) |> 
+  unnest(preds) |> 
+  unnest(sigs, names_sep = ".") |> # game changer!
+  mutate(across(c(predicted, conf.low, conf.high), ~ifelse(dv == 'completeness', .x, exp(.x)))) |> 
+  mutate(dv = factor(case_when( # better labels
+      dv == 'log_density'      ~ 'Sampling Density'
+    , dv == 'completeness' ~ 'Estimated Completeness (%)'
+    , dv == 'log_richness'     ~ 'Expected Species Richness'
+    , TRUE ~ 'ERROR'
+    ), levels = c('Sampling Density', 'Estimated Completeness (%)', 'Expected Species Richness'))
+    , level = factor(level, levels = c('species', 'family'))
+    , p_val = cut(  sigs.p.value
+                  , breaks = c(0, 0.0001, 0.001, 0.01, 0.05, Inf)
+                  , labels = c("****", "***", "**", "*", "ns"))
+    , ecoregion = str_to_title(ecoregion) |> 
+      str_wrap(18)
+    )
+
+sig_labs_eco_sd <-
+  preds_eco |> 
+  filter(dv == 'Sampling Density') |> 
+  mutate(y_ann = as.numeric(
+    case_when(
+      taxon == 'amphibia'         ~ '22'
+    , taxon == 'aves'             ~ '900'
+    , taxon == 'fungi'  & level != 'family' ~ '9'
+    , taxon == 'fungi'  & level == 'family' ~ '7'
+    , taxon == 'insecta'& level != 'family' ~ '45'
+    , taxon == 'insecta'& level == 'family' ~ '43'
+    , taxon == 'mammalia' ~ '25'
+    , taxon == 'plantae' ~ '42'
+    , taxon == 'reptilia' ~ '20'
+    , TRUE ~ 'ERROR'
+    ))) |> 
+  select(taxon : dv, p_val, y_ann)
+
+
+# viz: Sampling density
+fig_3a_eco <- 
+  preds_eco |> 
+  filter(dv == 'Sampling Density') |> 
+  ggplot(aes(x, predicted, color = level)) + 
+  geom_point(position = position_dodge(.85)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = .4, position = position_dodge(.85)) +
+  scale_color_viridis_d(option = 'D', begin = .25, end = .75) +
+  facet_grid(taxon ~ ecoregion, scales = 'free_y') +
+  theme_bw(12) +
+  theme(legend.position = 'bottom', legend.title = element_blank()) +
+  # lims(y = c(0, 170)) +
+  labs(
+    x = '', 
+    title = 'Sampling Density',
+    subtitle = 'lm(y ~ holc_grade)',
+    y = 'Predicted Sampling Density'
+    ) +
+  geom_text(data = sig_labs_eco_sd |> filter(dv == 'Sampling Density')
+            , aes(x = 2.5, y = y_ann, label = p_val), show.legend = FALSE) +
+  # geom_segment(data = sig_labs2 |> filter(dv == 'Sampling Density')
+  #              , aes(x = 1.15, xend = 3.85, y = bar_height, yend = bar_height)) +
+  NULL
+
+fig_3a_eco
+
+ggsave(  filename = paste0(getwd(), '/figures/mods_preds_backtransformed_pvals_annot_eco_density_'
+                           , Sys.Date(), '.png')
+       , width = 8.7, height = 10, units = 'cm'
+       , dpi = 450
+       , scale = 2.5
+       )
+
+```
+
+#### Estimated Completeness (%)
+```{r}
+
+sig_labs_eco_comp <-
+  preds_eco |> 
+  filter(dv == 'Estimated Completeness (%)') |> 
+  mutate(y_ann = as.numeric(
+    case_when(
+      taxon == 'amphibia'         ~ '115'
+    , taxon == 'aves'             ~ '85'
+    , taxon == 'fungi'  & level != 'family' ~ '65'
+    , taxon == 'fungi'  & level == 'family' ~ '60'
+    , taxon == 'insecta'& level != 'family' ~ '60'
+    , taxon == 'insecta'& level == 'family' ~ '55'
+    , taxon == 'mammalia' ~ '90'
+    , taxon == 'plantae' ~ '55'
+    , taxon == 'reptilia' ~ '75'
+    , TRUE ~ 'ERROR'
+    ))) |> 
+  select(taxon : dv, p_val, y_ann)
+
+
+# viz: Sampling density
+fig_3b_eco <- 
+  preds_eco |> 
+  filter(dv == 'Estimated Completeness (%)') |> 
+  ggplot(aes(x, predicted, color = level)) + 
+  geom_point(position = position_dodge(.85)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = .4, position = position_dodge(.85)) +
+  scale_color_viridis_d(option = 'D', begin = .25, end = .75) +
+  facet_grid(taxon ~ ecoregion, scales = 'free_y') +
+  theme_bw(12) +
+  theme(legend.position = 'bottom', legend.title = element_blank()) +
+  # lims(y = c(0, 170)) +
+  labs(
+    x = '', 
+    title = 'Estimated Completeness (%)',
+    subtitle = 'lm(y ~ holc_grade)',
+    y = 'Predicted Estimated Completeness (%)'
+    ) +
+  geom_text(data = sig_labs_eco_comp |> filter(dv == 'Estimated Completeness (%)')
+            , aes(x = 2.5, y = y_ann, label = p_val), show.legend = FALSE) +
+  NULL
+
+fig_3b_eco
+
+ggsave(  filename = paste0(getwd(), '/figures/mods_preds_backtransformed_pvals_annot_eco_comp_'
+                           , Sys.Date(), '.png')
+       , width = 8.7, height = 10, units = 'cm'
+       , dpi = 450
+       , scale = 2.5
+       )
+
+```
+
+#### Expected Species Richness
+```{r}
+
+sig_labs_eco_rich <-
+  preds_eco |> 
+  filter(dv == 'Expected Species Richness') |> 
+  mutate(y_ann = as.numeric(
+    case_when(
+      taxon == 'amphibia'         ~ '12'
+    , taxon == 'aves'             ~ '125'
+    , taxon == 'fungi'  & level != 'family' ~ '115'
+    , taxon == 'fungi'  & level == 'family' ~ '110'
+    , taxon == 'insecta'& level != 'family' ~ '600'
+    , taxon == 'insecta'& level == 'family' ~ '575'
+    , taxon == 'mammalia' ~ '42'
+    , taxon == 'plantae' ~ '300'
+    , taxon == 'reptilia' ~ '15'
+    , TRUE ~ 'ERROR'
+    ))) |> 
+  select(taxon : dv, p_val, y_ann)
+
+
+# viz: Expected Species Richness
+fig_3c_eco <- 
+  preds_eco |> 
+  filter(dv == 'Expected Species Richness') |> 
+  ggplot(aes(x, predicted, color = level)) + 
+  geom_point(position = position_dodge(.85)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = .4, position = position_dodge(.85)) +
+  scale_color_viridis_d(option = 'D', begin = .25, end = .75) +
+  facet_grid(taxon ~ ecoregion, scales = 'free_y') +
+  theme_bw(12) +
+  theme(legend.position = 'bottom', legend.title = element_blank()) +
+  # lims(y = c(0, 170)) +
+  labs(
+    x = '', 
+    title = 'Expected Species Richness',
+    subtitle = 'lm(y ~ holc_grade)',
+    y = 'Predicted Expected Species Richness)'
+    ) +
+  geom_text(data = sig_labs_eco_rich |> filter(dv == 'Expected Species Richness')
+            , aes(x = 2.5, y = y_ann, label = p_val), show.legend = FALSE) +
+  NULL
+
+fig_3c_eco
+
+ggsave(  filename = paste0(getwd(), '/figures/mods_preds_backtransformed_pvals_annot_eco_rich_'
+                           , Sys.Date(), '.png')
+       , width = 8.7, height = 10, units = 'cm'
+       , dpi = 450
+       , scale = 2.5
+       )
+
+```
+
+
 
 
 # models original (OLD)

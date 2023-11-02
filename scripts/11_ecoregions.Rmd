@@ -1,0 +1,166 @@
+---
+title: "ecoregions"
+author: "Dexter H. Locke, PhD"
+date: "`r format(Sys.time())`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+    
+# 0 set up: load libraries, custom functions, set defaults
+```{r}
+
+# load libraries
+# packages we'll be using
+packs <- c(
+    'tidyverse'  # a must have
+  , 'tidylog'    # prints out what was done in dplyr and tidr
+  # , 'gbifdb' # GBIF
+  # , 'fst' # a faster table, makes outputs files much smaller, too.
+  # , 'terra'
+  # , 'KnowBR'    # creates biodiversity estimates like completeness.
+  # , 'tidycensus'      # Census access
+  , 'sf'        # spatial support
+  , 'mapview'   # webmaps
+  , 'janitor'   # cleans things up, also pipe-friendly cross-tabulations
+  , 'tictoc'    # times things
+  , 'beepr'     # makes noises
+  # , 'ggpubr'    # boxplots with significance testing.
+  # , 'lme4'
+  # , 'ggeffects' # nice predictions
+  )
+
+
+# check for all of the libraries, install if you don't have them
+if (length(setdiff(packs, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packs, rownames(installed.packages())))  
+}
+
+# load them
+vapply(packs, library, character.only = TRUE, logical(1), logical.return = TRUE, quietly = TRUE)
+
+
+
+# custom function for "Not In"
+`%nin%` <- Negate(`%in%`)
+
+
+# redlining colors
+holc_pal <- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              #, '#A9A9A9'
+              ) # dark gray)
+
+holc_pal_f<- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              , '#A9A9A9'
+              , '#000000')
+
+# fixes mapview
+mapviewOptions(fgb = FALSE)
+
+sf_use_s2(FALSE) # fixes intersection problems. 
+```
+
+
+# 1 read in spatial data
+## A MSAs
+```{r}
+(
+msa_w_holc <- 
+  st_read(paste0(getwd()
+                 , '/working_data/MSA/msa_as_geopackage_2022-12-08 15-40-07.gpkg'))
+)
+
+msa_w_holc |> mapview()  
+
+```
+
+
+## B Ecoregions
+```{r}
+
+ecoregion <- # L2 contains both L1 and L2 codes
+  st_read('../biodiversity_in_a_concrete_jungle_data_too_big/na_cec_eco_l1/NA_CEC_Eco_Level1.shp') |> # LEVEL 1
+  # st_read('../biodiversity_in_a_concrete_jungle_data_too_big/na_cec_eco_l2/NA_CEC_Eco_Level2.shp') |> # LEVEL 2
+  st_transform(crs = st_crs(msa_w_holc))
+
+ecoregion |> 
+  st_drop_geometry() |> 
+  tabyl(NA_L1NAME, NA_L1CODE)
+  # tabyl(NA_L2NAME, NA_L2CODE)
+
+ecoregion |> 
+  st_drop_geometry() |> 
+  tabyl(NA_L1KEY, NA_L1NAME)
+  # tabyl(NA_L2KEY, NA_L2NAME)
+
+
+# ecoregion |> 
+#   mapview(zcol = 'NA_L1NAME')
+#   mapview(zcol = 'NA_L2NAME')
+
+ecoregion |> 
+  mapview(zcol = 'NA_L1NAME') +
+  # mapview(zcol = 'NA_L2NAME') + 
+  mapview(msa_w_holc, alpha.regions = 0)
+
+
+```
+
+
+# 2 intersect MSAs and ecoregions
+```{r}
+
+# tic(); msa_w_holc |>
+#   st_intersection(ecoregion) %>%
+#   mutate(int_area_m2 = st_area(.)) |>
+#   st_drop_geometry() |>
+#   group_by(msa_name) |>
+#   slice_max(int_area_m2) |>
+#   ungroup() |>
+#   select(msa_GEOID, NA_L1NAME) |>
+#   # select(msa_GEOID, NA_L2NAME) |>
+#   write_csv(paste0(getwd(), '/working_data/msa_ecoregion_level_1_keys_', Sys.Date(), '.csv')); toc() # ~15 seconds
+#   # write_csv(paste0(getwd(), '/working_data/msa_ecoregion_level_2_keys_', Sys.Date(), '.csv')); toc() # ~5 seconds
+
+msa_eco_int <- 
+  read_csv('working_data/msa_ecoregion_level_1_keys_2023-11-01.csv')
+
+msa_eco_int |> tabyl(NA_L1NAME)
+  # tabyl(NA_L2NAME)
+
+```
+
+
+## B HOLC to MSA lookup?
+```{r}
+# 
+# 
+# (holc_msa_keys <-
+#     read_csv(paste0(getwd()
+#                     , '/working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv')
+#              , col_types = 'cc')) # makes type = character
+# 
+# 
+# # (holc <- st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg', as_tibble = TRUE) |> 
+# #     filter(st_is(geom, 'POLYGON')) |> 
+# #     select(id, holc_grade, area_holc_km2) |> 
+# #     st_drop_geometry())
+
+```
+
+
+# end
