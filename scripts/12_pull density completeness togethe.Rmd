@@ -300,6 +300,12 @@ ndvi <- read_csv('working_data/ndvi_holc.csv')
 #   select(id, holc_grade, area_holc_km2) |> 
 #   filter(id %in% no_ndvi_ids) |> mapview()
 # 
+# st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg', as_tibble = TRUE) |>
+#   filter(st_is(geom, 'POLYGON')) |>
+#   select(id, holc_grade, area_holc_km2) |>
+#   filter(id %in% no_ndvi_ids) |>
+#   st_write('working_data/ndvi/polys_missing_ndvi/polys.shp')
+# 
 # ndvi |> left_join(comp, by = 'id')
 # 
 # ndvi |> anti_join(comp |> filter(id_type == 'id'), by = 'id')
