@@ -21,6 +21,113 @@ i   HOLC
 ii  UA
 iii MSA
 
+
+
+# Dec 14, 2023 meeting
+
+Millie re NDVI in Manhattan?
+  do in R?
+
+ideas
+Different taxon have a different number of species (and families)
+  There are just fewer mamamals than insects, for example
+    need to account for that? Or acknowledge
+      Diego- no
+        weighting by number of species (or families) can be done
+        
+  People are *looking* for specific things
+    why record an american Robin, for exapmle
+      observer bias BioScience paper
+    Are the volunteers recording everything or just the special, interesting, rare, notable species
+      Discussion point
+
+taxon things (winners and losers in anthropocene, Myla et al?)
+  birds fly, birders are weird
+  insects have a bazillion species
+  not a lot of mammal species
+  amphibians and reptiles have limited habitate
+
+review
+  Bivariate findings
+    graphics
+      
+    interpretations
+      sampling density
+        Everythign but fungi, more data in A than D
+        something on UA and MSA
+      
+      percent completeness
+        Birds A to D differences
+        insects and plants: reverse D to A differences!
+        
+        we no very little *even* in the best sampled areas
+          volunteers are msssing insects, fungi and plants
+      
+        UA and MSA *much* higher, despite lower sampling density
+      
+      richness
+        Birds, no duh
+          plants across HOLC
+          
+        expected richness is mostly invariant to HOLC
+          birds are differences wrt all outcomes (not good indicators?)
+          
+        more spatially explicit way?
+          
+        would have expected fewer plants and more insects?
+        
+        Discussion: bird biodiversity data are were most of the data are (1/2 of data) and 1% of biodiveristy, might not be a good indicator of urban biodiversity at all. 
+          more complex for the rest of the tree of life
+  
+  modelling process
+    Does FAMILY richness need some kind of adjustment? Not a "fair' comparison with species-level?
+    graphics
+      sig indicators
+      add legend/key for family vs genus (3row fig, panel C)
+      Which mod? - AIC min
+      clean up the sig stars
+        sig in B needs orange "NS"
+        sig in C put orange on top purple, orange (side by side.)
+      completeness, add add the axes lables for EACH panel
+      titles per panel
+        A increased sapmling density in non redlinined areas
+        B idiosyncratic trends
+        C 
+    interpretations
+  
+  ecoregion analyses
+    modelling: complaints over missing data? debugging 
+    graphics
+      leave for now
+    interpretations
+      supplemental
+      we don't have data for more complex models, that is a finding in its own way
+      here's are rinky dink linear model
+
+  Next steps
+    read Cesar's preprint
+    re-read Schell
+    Just email word doc
+    friendly reviewers
+      Aronson
+      (Lerman?)
+      Lambert
+
+LEGACY of redlining on data availability
+Ecologically relevant because ?
+Functional diversity
+life history of animals
+species vs traits and functional diversity.
+
+without these data its hard to argue for?
+
+strong evidence for context dependency of redlining
+
+decriptive statistics by taxon, (irrespective of HOLC?)
+  percent completeness
+    We need more data for these taxon!
+
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -777,6 +884,11 @@ tic(); mods_preds <-
          ); toc(); beep() # ~13 seconds
 
 
+# which model was chosen with the AIC minimizaiton?
+mods_preds |> 
+  tabyl(name, taxon, level) |> 
+  adorn_totals('col')
+
 ```
 
 ### viz: facet grid
@@ -1019,7 +1131,11 @@ fig_1a <-
     # title = 'Sampling Density'
     y = 'Predicted Sampling Density'
     ) +
-  geom_text(data = sig_labs2 |> filter(dv == 'Sampling Density')
+  geom_text(data = sig_labs2 |> 
+              filter(dv == 'Sampling Density') |> 
+              mutate(star_height = ifelse(taxon == 'fungi' & level == 'family'
+                                          , 3.85
+                                          , star_height))
             , aes(x = 2.5, y = star_height, label = p_val), show.legend = FALSE) +
   # geom_segment(data = sig_labs2 |> filter(dv == 'Sampling Density')
   #              , aes(x = 1.15, xend = 3.85, y = bar_height, yend = bar_height)) +
@@ -1038,7 +1154,7 @@ fig_1b <-
   scale_color_viridis_d(option = 'A', begin = .25, end = .75) +
   # facet_grid(dv ~ taxon, scales = 'free') +
   facet_wrap(~ taxon
-             # , scales = 'free_y'
+             , scales = 'free_y'
              , nrow = 1) +
   theme_bw(11) +
   lims(y = c(0, 100)) +
@@ -1047,8 +1163,15 @@ fig_1b <-
     x = '', 
     y = 'Estimated Completeness (%)'
     ) +
-  geom_text(data = sig_labs2 |> filter(dv == 'Estimated Completeness (%)')
-            , aes(x = 2.5, y = 90, label = p_val), show.legend = FALSE) +
+  geom_text(data = sig_labs2 |> 
+              filter(dv == 'Estimated Completeness (%)') |> 
+              mutate(star_height = 99,
+                     x_axis = case_when(
+                         level == 'species' & (taxon == 'fungi' | taxon == 'insecta') ~ 1.9
+                       , level == 'family'  & (taxon == 'fungi' | taxon == 'insecta') ~ 3.1
+                       , TRUE ~ 2.5
+                     ))
+            , aes(x = x_axis, y = star_height, label = p_val), show.legend = FALSE) +
   # geom_segment(data = sig_labs2 |> filter(dv == 'Sampling Density')
   #              , aes(x = 1.15, xend = 3.85, y = bar_height, yend = bar_height)) +
   NULL
@@ -1067,13 +1190,27 @@ fig_1c <-
              , scales = 'free_y'
              , nrow = 1) +
   theme_bw(11) +
-  theme(legend.position = 'none', legend.title = element_blank()) +
+  # theme(legend.position = 'none', legend.title = element_blank()) +
+  theme(legend.position = 'bottom') +
   labs(
     x = '', 
     y = 'Expected Species Richness'
     ) +
-  geom_text(data = sig_labs2 |> filter(dv == 'Expected Species Richness')
-            , aes(x = 2.5, y = star_height, label = p_val), show.legend = FALSE) +
+  geom_text(data = sig_labs2 |> 
+              filter(dv == 'Expected Species Richness') |> 
+              mutate(star_height = 
+                       case_when(
+                         level == 'family' & taxon == 'fungi' ~ 37.3
+                       , level == 'family'  & taxon == 'insecta' ~ 98.6
+                       , TRUE ~ star_height),
+                     x_axis = case_when(
+                         level == 'species' & (taxon == 'fungi' | taxon == 'insecta') ~ 1.9
+                       , level == 'family'  & (taxon == 'fungi' | taxon == 'insecta') ~ 3.1
+                       , TRUE ~ 2.5
+                     ))
+            , aes(x = x_axis, y = star_height, label = p_val), show.legend = FALSE) +
+  # geom_text(data = sig_labs2 |> filter(dv == 'Expected Species Richness')
+  #           , aes(x = 2.5, y = star_height, label = p_val), show.legend = FALSE) +
   # geom_segment(data = sig_labs2 |> filter(dv == 'Sampling Density')
   #              , aes(x = 1.15, xend = 3.85, y = bar_height, yend = bar_height)) +
   NULL
@@ -1134,7 +1271,7 @@ tic(); mods_eco_preds <-
   tidylog::mutate(
     # sampling density
       mods = map(data, ~lm(dep_var ~ holc_grade, .x))
-    # , mix_mod_density_min = map(data, ~lmer(dep_var ~ holc_grade + (1 | msa_GEOID), .x))
+    # , mix_mod_density_min = map(data, ~lmer(dep_var ~ holc_grade + (1 | msa_GEOID), .x)) # FIXME
     # , mix_mod_density_max = map(data, ~lmer(dep_var ~ holc_grade + pop_per_km + mean_ndvi + pct_pad_cover + pct_water + (1 | msa_GEOID), .x))
     , preds = map(mods, ggpredict, 'holc_grade')
     , sigs = map(mods, hypothesis_test, 'holc_grade') # this is slow.
@@ -1142,7 +1279,7 @@ tic(); mods_eco_preds <-
     ); toc(); beep() # ~26 seconds
 
 
-mods_eco_preds |> 
+mods_eco_preds
   
 ```
 
