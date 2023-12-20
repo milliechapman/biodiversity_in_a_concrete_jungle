@@ -695,8 +695,9 @@ comp |>
   NULL
 
 # # save out
-# ggsave(  filename = paste0(getwd(), '/figures/sampling_density_3row_', Sys.Date(), '.png')
-#        , width = 6, height = 9, units = 'in'
+# ggsave(filename = paste0(getwd(), '/figures/sampling_density_3row_', Sys.Date(), '.png')
+#        # , width = 6, height = 9, units = 'in'
+#        , width = 18, height = 22, units = 'cm'
 #        , dpi = 450
 #        , scale = 1.65)
 
@@ -739,7 +740,8 @@ comp |>
 
 # # save out
 # ggsave(  filename = paste0(getwd(), '/figures/estimated_completeness_', Sys.Date(), '.png')
-#        , width = 6, height = 9, units = 'in'
+#        # , width = 6, height = 9, units = 'in'
+#        , width = 18, height = 22, units = 'cm'
 #        , dpi = 450
 #        , scale = 1.65)
 
@@ -773,15 +775,16 @@ comp |>
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = .5), legend.position = 'bottom') +
   guides(fill = guide_legend(nrow = 1)) +
   labs(
-    title = 'Expected Species Richness'
-    , x = '', y = 'Expected Species Richness') +
+    title = 'Expected Richness'
+    , x = '', y = 'Expected Richness') +
   annotation_logticks(sides = 'l') + # used with log10 scale
   facet_wrap(~taxon, scales = 'free', nrow = 3) +
   NULL
 
 # # save out
 # ggsave(  filename = paste0(getwd(), '/figures/expected_richness_', Sys.Date(), '.png')
-#        , width = 6, height = 9, units = 'in'
+#        # , width = 6, height = 9, units = 'in'
+#        , width = 18, height = 22, units = 'cm'
 #        , dpi = 450
 #        , scale = 1.65)
 
@@ -1194,7 +1197,7 @@ fig_1c <-
   theme(legend.position = 'bottom') +
   labs(
     x = '', 
-    y = 'Expected Species Richness'
+    y = 'Expected Richness'
     ) +
   geom_text(data = sig_labs2 |> 
               filter(dv == 'Expected Species Richness') |> 
@@ -1216,11 +1219,12 @@ fig_1c <-
   NULL
 
 
-fig_1a / fig_1b / fig_1c + plot_annotation(tag_levels = 'A')
+fig_1a / fig_1b / fig_1c + plot_annotation(tag_levels = 'I')
 
 ggsave(  filename = paste0(getwd(), '/figures/mods_preds_backtransformed_pvals_annot_'
                            , Sys.Date(), '.png')
        , width = 8.7, height = 10, units = 'cm'
+       # , width = 18, height = 22, units = 'cm'
        , dpi = 450
        , scale = 2.2
        )
