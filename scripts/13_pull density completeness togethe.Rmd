@@ -250,7 +250,7 @@ holc_comp <-
   #             select(msa_GEOID, ua_GEOID)
   #           , by = 'msa_GEOID') |> 
   # cosmetic reorder
-  select(id_type, id = Area, density, completeness = Completeness, expected_richness = Richness, holc_grade, taxon, level
+  select(id_type, id = Area, density, completeness = Completeness, expected_richness = Richness, holc_grade, taxon, level, area_km2 = area_holc_km2
          # , ua_GEOID, msa_GEOID
          ) # cosmetic reorder
 # interaction(grade, family?)
@@ -288,7 +288,7 @@ msa_comp <-
   #             mutate(msa_GEOID = as.character(msa_GEOID)) |> 
   #             select(msa_GEOID, ua_GEOID)
   #           , by = 'msa_GEOID') |> 
-  select(id_type, id = msa_GEOID, density, completeness = Completeness, expected_richness = Richness, holc_grade, taxon, level
+  select(id_type, id = msa_GEOID, density, completeness = Completeness, expected_richness = Richness, holc_grade, taxon, level, area_km2 = area_msa_km2
          # , ua_GEOID, msa_GEOID
          ) # cosmetic reorder
 
@@ -328,7 +328,7 @@ ua_comp <-
          , id_type = 'ua_GEOID') |>  
   left_join(read_csv('working_data/MSA_UA_lookup.csv') |> mutate(msa_GEOID = as.character(msa_GEOID))
             , by = 'ua_GEOID') |>
-  select(id_type, id = ua_GEOID, density, completeness = Completeness, expected_richness = Richness, holc_grade, taxon, level
+  select(id_type, id = ua_GEOID, density, completeness = Completeness, expected_richness = Richness, holc_grade, taxon, level, area_km2 = ua_area_km2
          # , ua_GEOID, msa_GEOID
          ) # cosmetic reorder
 
@@ -480,14 +480,14 @@ holc |>
 ## F join up (and save out?)
 ```{r}
 
-# holc_comp |> left_join(holc, by = 'id') # nice check, keeping it 100
-# 
-# # do the msa-holc keys line up correctly?
-# holc_comp |>
-#   anti_join(
-#     read_csv('working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv', col_types = 'cc')
-#     , by = 'id') # yes
-# 
+holc_comp |> left_join(holc, by = 'id') # nice check, keeping it 100
+
+# do the msa-holc keys line up correctly?
+holc_comp |>
+  anti_join(
+    read_csv('working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv', col_types = 'cc')
+    , by = 'id') # yes
+
 # # do the joins and other clean up
 # nested_data <-
 #   holc_comp |>
@@ -523,6 +523,7 @@ holc |>
 #          , pct_pad_cover
 #          , pct_water
 #          , msa_GEOID # for random effects
+#          , area_km2
 #          ) |>
 #   group_by(taxon, level) |>
 #   nest()
@@ -535,7 +536,8 @@ holc |>
 # # save out
 # save(nested_data, file = paste0('working_data/nested_data/nested_data_', Sys.Date(), '.RData'))
 
-load('working_data/nested_data/nested_data_2023-10-13.RData')
+# load('working_data/nested_data/nested_data_2023-10-13.RData')
+load('working_data/nested_data/nested_data_2024-02-19.RData')
 
 # why the NAs?
 holc_comp |>
@@ -795,7 +797,9 @@ comp |>
 ## A fit models
 ```{r}
 
-load('working_data/nested_data/nested_data_2023-10-13.RData')
+# load('working_data/nested_data/nested_data_2023-10-13.RData')
+load('working_data/nested_data/nested_data_2024-02-19.RData')
+
 
 nested_data # why those NAs?
 
@@ -850,6 +854,7 @@ tic(); mods_preds <-
   nested_data |> # unnest(data) |> droplevels() |> group_by(taxon, level) |> nest() |> 
   drop_na() |> 
   unnest(data) |> 
+  tidylog::mutate(richness_per_area = log(expected_richness / area_km2)) |> 
   tidylog::mutate(across(pop_per_km : pct_water, ~as.numeric(scale(.x)))) |> # scale numeric predictors
   nest() |> 
   tidylog::mutate(
@@ -863,10 +868,15 @@ tic(); mods_preds <-
     , mix_mod_completeness_min = map(data, ~lmer(completeness ~ holc_grade + (1 | msa_GEOID), .x))
     , mix_mod_completeness_max = map(data, ~lmer(completeness ~ holc_grade + pop_per_km + mean_ndvi + pct_pad_cover + pct_water + (1 | msa_GEOID), .x))
         
-    # completeness
+    # Richness
     , lin_mod_richness_min = map(data, ~lm(log_richness ~ holc_grade, .x))
     , mix_mod_richness_min = map(data, ~lmer(log_richness ~ holc_grade + (1 | msa_GEOID), .x))
     , mix_mod_richness_max = map(data, ~lmer(log_richness ~ holc_grade + pop_per_km + mean_ndvi + pct_pad_cover + pct_water + (1 | msa_GEOID), .x))
+    
+    # Richness per area - NEW!
+    , lin_mod_richness_area_min = map(data, ~lm(richness_per_area ~ holc_grade, .x))
+    , mix_mod_richness_area_min = map(data, ~lmer(richness_per_area ~ holc_grade + (1 | msa_GEOID), .x))
+    , mix_mod_richness_area_max = map(data, ~lmer(richness_per_area ~ holc_grade + pop_per_km + mean_ndvi + pct_pad_cover + pct_water + (1 | msa_GEOID), .x))
   ) |> 
   select(-data) |> # keys and models
   pivot_longer(cols = !c(taxon, level), values_to = 'mods') |>
@@ -892,6 +902,11 @@ mods_preds |>
   tabyl(name, taxon, level) |> 
   adorn_totals('col')
 
+
+# FIXME cut?
+nested_data |> # unnest(data) |> droplevels() |> group_by(taxon, level) |> nest() |> 
+  drop_na() |> 
+  unnest(data) |> mutate(richness_per_area = log(expected_richness / area_km2)) |> ggplot(aes(richness_per_area)) + geom_density()
 ```
 
 ### viz: facet grid
@@ -901,7 +916,7 @@ mods_preds |>
 fig_1 <- 
   mods_preds |>
   unnest(preds) |> 
-  mutate(across(c(predicted, conf.low, conf.high), ~ifelse(dv == 'completeness', .x, exp(.x)))) |> 
+  mutate(across(c(predicted, conf.low, conf.high), ~ifelse(dv == 'completeness', .x, exp(.x)))) |> ## | dv == 'richness' ?!?!
   mutate(dv = factor(case_when( # better labels
       dv == 'density'      ~ 'Sampling Density'
     , dv == 'completeness' ~ 'Estimated Completeness (%)'

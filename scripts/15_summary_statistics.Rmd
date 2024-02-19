@@ -74,7 +74,8 @@ mapviewOptions(fgb = FALSE)
 # 1 read data
 ## A MSA / UA / States 
 ```{r}
-load('working_data/nested_data/nested_data_2023-10-13.RData')
+# load('working_data/nested_data/nested_data_2023-10-13.RData')
+load('working_data/nested_data/nested_data_2024-02-19.RData') # contains area for computing expected richness per area
 
 # How many MSAs?
 nested_data |> 
@@ -145,4 +146,27 @@ list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA', recu
 
 
 ```
+
+
+## C what is the average completeness?
+```{r}
+
+mods_preds |>
+  unnest(preds) |> 
+  mutate(across(c(predicted, conf.low, conf.high), ~ifelse(dv == 'completeness', .x, exp(.x)))) |> 
+  filter(dv == 'completeness') |>
+  group_by() |> 
+  summarise(mean_est_comp = mean(predicted))
+
+
+mods_preds |>
+  unnest(preds) |> 
+  mutate(across(c(predicted, conf.low, conf.high), ~ifelse(dv == 'completeness', .x, exp(.x)))) |> 
+  filter(dv == 'completeness') |>
+  group_by(taxon, level) |> 
+  summarise(mean_est_comp = mean(predicted))
+
+```
+
+
 
