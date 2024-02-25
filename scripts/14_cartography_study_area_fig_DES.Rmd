@@ -1,0 +1,288 @@
+---
+title: "14_cartography_study_area_fig"
+author: "Dexter H. Locke, PhD"
+date: "`r format(Sys.time())`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<!-- To retrieve a single file from an old commit to your working copy, simply use: -->
+
+<!-- $ git checkout [revision_hash] [file_name] -->
+
+<!-- You can use the HEAD pointer as the [revision_hash] if you want to: -->
+
+<!--     HEAD - Points to the Last Commit on the current repository; -->
+
+<!--     HEAD^ - Last Commit - 1; -->
+
+<!--     HEAD^^ - Last Commit - 2; -->
+
+<!--     HEAD~10 - 10 commits behind of HEAD; -->
+
+<!--     Git checkout HEAD~1 filename -->
+
+
+    
+# 0 set up: load libraries, custom functions, set defaults
+```{r}
+
+# load libraries
+# packages we'll be using
+packs <- c(
+    'tidyverse'  # a must have
+  , 'tidylog'    # prints out what was done in dplyr and tidr
+  # , 'gbifdb' # GBIF
+  # , 'fst' # a faster table, makes outputs files much smaller, too.
+  # , 'terra'
+  # , 'KnowBR'    # creates biodiversity estimates like completeness.
+  , 'tidycensus'      # Census access
+  , 'sf'        # spatial support
+  , 'mapview'   # webmaps
+  , 'janitor'   # cleans things up, also pipe-friendly cross-tabulations
+  , 'tictoc'    # times things
+  , 'beepr'     # makes noises
+  # , 'ggpubr'    # boxplots with significance testing.
+  # , 'lme4'
+  # , 'ggeffects' # nice predictions
+  )
+
+
+# check for all of the libraries, install if you don't have them
+if (length(setdiff(packs, rownames(installed.packages()))) > 0) {
+  install.packages(setdiff(packs, rownames(installed.packages())))  
+}
+
+# load them
+vapply(packs, library, character.only = TRUE, logical(1), logical.return = TRUE, quietly = TRUE)
+
+
+
+# custom function for "Not In"
+`%nin%` <- Negate(`%in%`)
+
+
+# redlining colors
+holc_pal <- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              #, '#A9A9A9'
+              ) # dark gray)
+
+holc_pal_f<- c('#92BC6B' # green
+              , '#92C7C9' # blue
+              , '#E7DC6B' # yellow
+              , '#E47D67' # red
+              , '#A9A9A9'
+              , '#000000')
+
+# fixes mapview
+mapviewOptions(fgb = FALSE)
+```
+
+
+# 1 read data
+## A HOLC polygons
+```{r}
+# setwd('_students/Diego/biodiversity_in_a_concrete_jungle/working_data/')
+getwd()
+
+
+(holc <- st_read('working_data/holc_polys_saved/holc_plys_2022-12-08 20-13-17.gpkg', as_tibble = TRUE) |> 
+    filter(st_is(geom, 'POLYGON')) #|> 
+    # select(id, holc_grade, area_holc_km2) |> 
+    # st_drop_geometry()
+    )
+
+sf::sf_use_s2(FALSE) # bad geoms.. ugh
+
+(
+  holc_points <- 
+    holc |> 
+    group_by(city) |> 
+    summarise() |> 
+    st_centroid()
+  )
+
+holc_points |> mapview()
+
+```
+
+
+## B Urban Areas (UA) and Metropolitan Statistical Areas (MSA)
+```{r}
+
+
+read_csv('working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv', col_types = 'cc') # makes type = 
+
+read_csv('working_data/MSA_UA_lookup.csv') |> mutate(msa_GEOID = as.character(msa_GEOID))
+            # , by = 'ua_GEOID') 
+
+# MSA
+(msa <- 
+  st_read(paste0(getwd()
+                 , '/working_data/MSA/msa_as_geopackage_2022-12-08 15-40-07.gpkg')))
+
+# MSA donut
+(msa_donut <-st_read('working_data/MSA_donut/msa_ungraded.gpkg', as_tibble = TRUE) |> 
+    mutate(`Metropolitan Statistical Area` = 1) )
+
+# UA
+(ua <- st_read('working_data/UA/UA_as_geopackage_2023-01-23 15-48-08.gpkg', as_tibble = TRUE) |> 
+    mutate(`Urban Area` = 1))
+
+
+```
+
+## C States and CONUS boundary
+```{r}
+
+tibble(state.name) |> filter(state.name %nin% c('Alaska', 'Hawaii')) |> pull(state.name)
+
+state_boundaries <- 
+  get_acs(
+      geography = 'state'
+    , state = tibble(state.name) |> filter(state.name %nin% c('Alaska', 'Hawaii')) |> pull(state.name)
+    , variables = c('pop' = 'B01001_001') 
+    , year = 2019
+    , geometry = TRUE
+    , output = 'wide'
+    , moe_level = 95
+    )
+
+(conus <- 
+  state_boundaries |> 
+  group_by() |> 
+  summarise() |> 
+  rowid_to_column())
+
+```
+
+# 2 attempt some cartography
+## A conus locator
+```{r}
+
+require(usmap)
+
+i <- plot_usmap(regions = "states", color='black',fill='grey90', exclude=c('Alaska', 'Hawaii')) + 
+   # labs(title = "U.S. States",
+   #        subtitle = "Assessment of biodiversity information across HOLC grades, MSA and UA")+
+   geom_sf(data = holc_points, color = 'navyblue', alpha = .5) +
+    scale_x_continuous(breaks = seq(-120, -70, by = 20)) +
+  scale_y_continuous(breaks = seq(25, 50, by = 10)) +
+  # theme_bw() +
+  theme_classic()
+ 
+ i
+ 
+```
+
+
+### San Diego (or Phoenix)
+```{r}
+
+msa |> filter(msa_name == 'San Diego-Chula Vista-Carlsbad, CA Metro Area') |> st_bbox()
+
+# New Haven
+# msa |> filter(msa_name == 'Hartford-East Hartford-Middletown, CT Metro Area') |> st_bbox()
+
+# Hartford
+# ii <- 
+#   ggplot() + 
+#   # geom_sf(data = conus, color = 'black', fill = NA) +
+#   geom_sf(data = state_boundaries, lwd = .75) +
+#   geom_sf(data = msa, aes(color = 'Metropolitan Statistical Area'), lwd = .7) +
+#   # scale_color_manual(values = '#440154FF', name = '') + 
+#   geom_sf(data = ua, aes(color = 'Urban Area'), lwd = .6) +
+#   scale_color_manual(values = c('#2A788EFF', '#440154FF'), name = '') +
+#   geom_sf(data = holc, aes(fill = holc_grade)) +
+#   scale_fill_manual(values = holc_pal, name = 'HOLC Grade') +
+#   # coord_sf(xlim = c(-13.3, -110), ylim = c(32.5, 34), expand = FALSE) + # ~clips PHX
+#   coord_sf(xlim = c(-73.2, -72), ylim = c(41, 42.5), expand = FALSE) + # clips ~San Diego
+#   scale_x_continuous(breaks = seq(-117.9, -116.0, by = .8)) +
+#   scale_y_continuous(breaks = seq(32.6, 33.4, by = .4)) +
+#   theme_bw() +
+#   theme(legend.position = 'bottom', legend.box="vertical") +
+#   NULL
+#   
+# ii
+
+
+ii <- 
+  ggplot() + 
+  # geom_sf(data = conus, color = 'black', fill = NA) +
+  geom_sf(data = state_boundaries, lwd = .75) +
+  geom_sf(data = msa, aes(color = 'Metropolitan Statistical Area'), lwd = .7) +
+  # scale_color_manual(values = '#440154FF', name = '') + 
+  geom_sf(data = ua, aes(color = 'Urban Area'), lwd = .6) +
+  scale_color_manual(values = c('#2A788EFF', '#440154FF'), name = '') +
+  geom_sf(data = holc, aes(fill = holc_grade)) +
+  scale_fill_manual(values = holc_pal, name = 'HOLC Grade') +
+  # coord_sf(xlim = c(-13.3, -110), ylim = c(32.5, 34), expand = FALSE) + # ~clips PHX
+  coord_sf(xlim = c(-117.65, -116), ylim = c(32.5, 33.55), expand = FALSE) + # clips ~San Diego
+  scale_x_continuous(breaks = seq(-117.6, -116.0, by = .8)) +
+  scale_y_continuous(breaks = seq(32.6, 33.4, by = .4)) +
+  theme_bw() +
+  theme(legend.position = 'bottom', legend.box="vertical") +
+  NULL
+  
+ii
+
+```
+
+
+<!-- Small: approximately 9 cm x 6 cm -->
+<!-- Medium: approximately 11 cm x 11 cm -->
+<!-- Large: approximately 18 cm x 22 cm -->
+
+# D combine and save out
+```{r}
+
+
+library(patchwork)
+# i / ii / iii
+i / ii + patchwork::plot_annotation(tag_levels = 'I')
+
+ggsave(  filename = paste0(getwd(), '/figures/study_area_', Sys.Date(), '.png')
+       , width = 6, height = 9, units = 'cm'
+       , dpi = 450
+       , scale = 1.75
+       )
+
+# # https://r-spatial.org/r/2018/10/25/ggplot2-sf-3.html
+# cowplot::ggdraw(xlim = c(0, 50), ylim = c(0, 50)) +
+#     draw_plot(florida, x = 0, y = 0, width = 20, height = 20) +
+#     draw_plot(siteA, x = 20, y = 11.25, width = 8, height = 8) +
+#     draw_plot(siteB, x = 20, y = 2.5, width = 8, height = 8) +
+#     geom_segment(aes(x = x1, y = y1, xend = x2, yend = y2), data = arrowA, 
+#         arrow = arrow(), lineend = "round") +
+#     geom_segment(aes(x = x1, y = y1, xend = x2, yend = y2), data = arrowB, 
+#         arrow = arrow(), lineend = "round")
+
+# https://r-spatial.org/r/2018/10/25/ggplot2-sf-3.html
+cowplot::ggdraw(xlim = c(0, 50), ylim = c(0, 50)) +
+  cowplot::draw_plot(i, x = 0, y = 30, width = 50, height = 20) +
+  cowplot::draw_plot(ii, x = 0, y = 0, width = 50, height = 30) +
+  geom_segment(aes(x = 12.75, y = 37.25, xend = 20, yend = 13.5)
+               , arrow = arrow(), lineend = "round") +
+    # geom_segment(aes(x = x1, y = y1, xend = x2, yend = y2), data = arrowB, 
+    #     arrow = arrow(), lineend = "round") +
+  NULL
+
+ggsave(  filename = paste0(getwd(), '/figures/study_area_arrow_', Sys.Date(), '.png')
+       , width = 6, height = 9, units = 'cm'
+       , dpi = 450
+       , scale = 1.75
+       )
+
+
+```
+
+
