@@ -477,6 +477,7 @@ holc |>
 
 ```
 
+
 ## F join up (and save out?)
 ```{r}
 
@@ -488,56 +489,60 @@ holc_comp |>
     read_csv('working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv', col_types = 'cc')
     , by = 'id') # yes
 
-# # do the joins and other clean up
-# nested_data <-
-#   holc_comp |>
-#   filter(id_type == 'id') |>
-#   left_join(holc |> select(-holc_grade), by = 'id') |> # adds area of holc polygons (needed for popd+)
-#   left_join(ndvi        , by = 'id') |>                # adds mean_ndvi
-#   left_join(pop_per_holc, by = 'id') |>                # adds population_est
-#   left_join(pad         , by = 'id') |>                # adds pct_pad_cover
-#   left_join(nwi_wide    , by = 'id') |>                # adds nwi_total_area_km2
-#   left_join(
-#     read_csv('working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv', col_types = 'cc')
-#     , by = 'id'
-#   ) |>
-#   replace_na(
-#     list(
-#         mean_ndvi               = 0 # FIXME is this appropriate or not?
-#       , population_est          = 0
-#       , pct_pad_cover           = 0
-#       , nwi_total_area_km2      = 0
-#       )) |>
-#   mutate(
-#       log_density = log(density)
-#     , log_richness = log(expected_richness)
-#     , holc_grade  = as.factor(holc_grade)
-#     , pop_per_km  = population_est / area_holc_km2
-#     , pct_water   = 100*(nwi_total_area_km2 / area_holc_km2)
-#     ) |> # glimpse()
-#   select(  id, log_density, completeness, log_richness
-#          , taxon: level
-#          , holc_grade
-#          , pop_per_km
-#          , mean_ndvi
-#          , pct_pad_cover
-#          , pct_water
-#          , msa_GEOID # for random effects
-#          , area_km2
-#          ) |>
-#   group_by(taxon, level) |>
-#   nest()
-# 
-# # a few double checks
-# nested_data$data[[1]] |> tabyl(msa_GEOID, holc_grade)
-# nested_data$data[[10]]
-# nested_data$data[[10]] |> drop_na(log_density)
-# 
-# # save out
-# save(nested_data, file = paste0('working_data/nested_data/nested_data_', Sys.Date(), '.RData'))
+# do the joins and other clean up
+nested_data <-
+  holc_comp |>
+  filter(id_type == 'id') |>
+  left_join(holc |> select(-holc_grade), by = 'id') |> # adds area of holc polygons (needed for popd+)
+  left_join(ndvi        , by = 'id') |>                # adds mean_ndvi
+  left_join(pop_per_holc, by = 'id') |>                # adds population_est
+  left_join(pad         , by = 'id') |>                # adds pct_pad_cover
+  left_join(nwi_wide    , by = 'id') |>                # adds nwi_total_area_km2
+  left_join(
+    read_csv('working_data/MSA/holc_msa_keys_2022-12-08 15-35-19.csv', col_types = 'cc')
+    , by = 'id'
+  ) |>
+  drop_na(mean_ndvi) |>
+  replace_na(
+    list(
+        # mean_ndvi               = 0 # FIXME is this appropriate or not? NO, its NOT
+       population_est          = 0
+      , pct_pad_cover           = 0
+      , nwi_total_area_km2      = 0
+      )) |>
+  mutate(
+      log_density = log(density)
+    , log_richness = log(expected_richness)
+    , holc_grade  = as.factor(holc_grade)
+    , pop_per_km  = population_est / area_holc_km2
+    , pct_water   = 100*(nwi_total_area_km2 / area_holc_km2)
+    ) |> # glimpse()
+  select(  id, log_density, completeness, log_richness
+         , expected_richness
+         , taxon: level
+         , holc_grade
+         , pop_per_km
+         , mean_ndvi
+         , pct_pad_cover
+         , pct_water
+         , msa_GEOID # for random effects
+         , area_km2
+         ) |>
+  group_by(taxon, level) |>
+  nest()
+
+# a few double checks
+nested_data$data[[1]] |> tabyl(msa_GEOID, holc_grade)
+nested_data$data[[10]]
+nested_data$data[[10]] |> drop_na(log_density)
+
+# save out
+save(nested_data, file = paste0('working_data/nested_data/nested_data_', Sys.Date(), '.RData'))
 
 # load('working_data/nested_data/nested_data_2023-10-13.RData')
-load('working_data/nested_data/nested_data_2024-02-19.RData')
+# load('working_data/nested_data/nested_data_2024-02-19.RData')
+# load('working_data/nested_data/nested_data_2024-02-20.RData')
+load('working_data/nested_data/nested_data_2024-03-27.RData')
 
 # why the NAs?
 holc_comp |>
@@ -798,7 +803,9 @@ comp |>
 ```{r}
 
 # load('working_data/nested_data/nested_data_2023-10-13.RData')
-load('working_data/nested_data/nested_data_2024-02-19.RData')
+# load('working_data/nested_data/nested_data_2024-02-19.RData')
+# load('working_data/nested_data/nested_data_2024-02-20.RData')
+load('working_data/nested_data/nested_data_2024-03-27.RData')
 
 
 nested_data # why those NAs?
@@ -906,7 +913,11 @@ mods_preds |>
 # FIXME cut?
 nested_data |> # unnest(data) |> droplevels() |> group_by(taxon, level) |> nest() |> 
   drop_na() |> 
-  unnest(data) |> mutate(richness_per_area = log(expected_richness / area_km2)) |> ggplot(aes(richness_per_area)) + geom_density()
+  unnest(data) |> 
+  mutate(richness_per_area = log(expected_richness / area_km2)) |> 
+  ggplot(aes(richness_per_area)) + 
+  geom_density()
+
 ```
 
 ### viz: facet grid
@@ -1051,6 +1062,11 @@ ggsave(  filename = paste0(getwd(), '/figures/mods_preds_backtransformed_pvals_'
 
 ### viz: each dependent variable as its own fig, bound together with patchwork
 ```{r}
+
+mods_preds |> 
+  select(taxon, level, dv, sigs) |> 
+  unnest(sigs) |> 
+  filter(dv == 'richness_area')
 
 sig_labs2 <- 
   mods_preds |>
@@ -1233,7 +1249,7 @@ fig_1c <-
   #              , aes(x = 1.15, xend = 3.85, y = bar_height, yend = bar_height)) +
   NULL
 
-
+library(patchwork)
 fig_1a / fig_1b / fig_1c + plot_annotation(tag_levels = 'I')
 
 ggsave(  filename = paste0(getwd(), '/figures/mods_preds_backtransformed_pvals_annot_'

@@ -75,7 +75,8 @@ mapviewOptions(fgb = FALSE)
 ## A MSA / UA / States 
 ```{r}
 # load('working_data/nested_data/nested_data_2023-10-13.RData')
-load('working_data/nested_data/nested_data_2024-02-19.RData') # contains area for computing expected richness per area
+# load('working_data/nested_data/nested_data_2024-02-19.RData') # contains area for computing expected richness per area
+load('working_data/nested_data/nested_data_2024-02-20.RData')
 
 # How many MSAs?
 nested_data |> 
@@ -144,6 +145,11 @@ list.files('../biodiversity_in_a_concrete_jungle_data_too_big/gbif_by_MSA', recu
   adorn_totals()
   )
 
+msa_counts_taxon |> 
+  adorn_percentages('col') |> 
+  mutate(pct = 100*n) |> 
+  tibble() |> 
+  arrange(desc(pct))
 
 ```
 
