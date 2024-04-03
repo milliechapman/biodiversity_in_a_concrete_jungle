@@ -175,4 +175,36 @@ mods_preds |>
 ```
 
 
+## D Table S1: Descriptive statistics
+```{r}
+
+load('working_data/nested_data/nested_data_2024-03-27.RData')
+
+nested_data |> 
+  drop_na() |> 
+  unnest(data) |> 
+  ungroup() |> 
+  tidylog::mutate(  richness_per_area = log(expected_richness / area_km2)
+                  , strata = paste0(taxon, ': ', level)
+                  ) |> 
+  tidylog::select(
+      `Sampling Density (log)` = log_density # dv
+    , `Estimated Completeness` = completeness
+    , `Expected Richness (log)` = log_richness
+    , strata # strata
+    , `HOLC Grade` = holc_grade   # iv
+    , `Population / km^2` = pop_per_km   # covariates
+    , `NDVI (mean)` = mean_ndvi
+    , `Protected Open, Accessible Space (%)` = pct_pad_cover
+    , `Water (%)` = pct_water
+  ) |> 
+  # drop_na() |> 
+  gtsummary::tbl_summary(by = 'strata') |> 
+  gtsummary::as_gt() ##|>
+  # gt::gtsave(filename = paste0('figures/Table_S1_Summary_Statistics_'
+  #                              , Sys.Date()
+  #                              , '.html')) # use extensions .html .tex .ltx .rtf
+
+
+```
 

@@ -1102,35 +1102,35 @@ sig_labs2 <-
 
 sig_labs2 |> data.frame()
 
-sig_labs <- 
-  mods_preds |> 
-  select(taxon, level, dv, sigs) |> 
-  unnest(sigs) |>
-  mutate(y_ann = as.numeric(
-    case_when(
-      dv == 'density'       & level != 'family' ~ '155'
-    , dv == 'density'       & level == 'family' ~ '145'
-    , dv == 'completeness'  & level != 'family' ~ '60'
-    , dv == 'completeness'  & level == 'family' ~ '57'
-    , dv == 'richness'      & level != 'family' ~ '80'
-    , dv == 'richness'      & level == 'family' ~ '72'
-    , TRUE ~ 'ERROR'
-    ))
-    , dv = factor(case_when( # better labels
-      dv == 'density'      ~ 'Sampling Density'
-    , dv == 'completeness' ~ 'Estimated Completeness (%)'
-    , dv == 'richness'     ~ 'Expected Species Richness'
-    , TRUE ~ 'ERROR'
-    ), levels = c('Sampling Density', 'Estimated Completeness (%)', 'Expected Species Richness'))
-    , level = factor(level, levels = c('species', 'family'))
-    # , p_val = round(p.value, 2)
-    , p_val = cut(  p.value
-                  , breaks = c(0, 0.0001, 0.001, 0.01, 0.05, Inf)
-                  , labels = c("****", "***", "**", "*", "ns"))
-    ) |>
-  arrange(dv)
-
-sig_labs |> data.frame()
+# sig_labs <- 
+#   mods_preds |> 
+#   select(taxon, level, dv, sigs) |> 
+#   unnest(sigs) |>
+#   mutate(y_ann = as.numeric(
+#     case_when(
+#       dv == 'density'       & level != 'family' ~ '155'
+#     , dv == 'density'       & level == 'family' ~ '145'
+#     , dv == 'completeness'  & level != 'family' ~ '60'
+#     , dv == 'completeness'  & level == 'family' ~ '57'
+#     , dv == 'richness'      & level != 'family' ~ '80'
+#     , dv == 'richness'      & level == 'family' ~ '72'
+#     , TRUE ~ 'ERROR'
+#     ))
+#     , dv = factor(case_when( # better labels
+#       dv == 'density'      ~ 'Sampling Density'
+#     , dv == 'completeness' ~ 'Estimated Completeness (%)'
+#     , dv == 'richness'     ~ 'Expected Species Richness'
+#     , TRUE ~ 'ERROR'
+#     ), levels = c('Sampling Density', 'Estimated Completeness (%)', 'Expected Species Richness'))
+#     , level = factor(level, levels = c('species', 'family'))
+#     # , p_val = round(p.value, 2)
+#     , p_val = cut(  p.value
+#                   , breaks = c(0, 0.0001, 0.001, 0.01, 0.05, Inf)
+#                   , labels = c("****", "***", "**", "*", "ns"))
+#     ) |>
+#   arrange(dv)
+# 
+# sig_labs |> data.frame()
 
 preds <- 
   mods_preds |>

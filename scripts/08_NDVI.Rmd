@@ -113,7 +113,8 @@ list.files('working_data/ndvi')
 
 ndvi <- 
   tibble(
-      filename = list.files('working_data/ndvi', full.names = TRUE)
+      filename = list.files('working_data/ndvi', full.names = TRUE) |>
+        str_subset('polys_missing_ndvi', negate = TRUE) # drops results of a test/dobule check
     , file_contents = map(filename, ~read_csv(., col_types = cols())) # makes less-verbose
     ) |> 
   mutate(unit = str_remove_all(filename, 'working_data/ndvi/modis250_ndvi_') |> 
@@ -127,6 +128,8 @@ ndvi <-
   select(unit, id, msa_GEOID = m_GEOID, ua_GEOID = GEOID, mean, max) # reduce and rename cols
 
 ndvi # totally rules!
+
+  
 ```
 
 
@@ -146,8 +149,57 @@ holc_ndvi_summs <-
   group_by(id) |>
   summarise(mean_ndvi = mean(mean))
 
-holc |> #anti_join(ndvi_summs, by = 'id') # fails perfect!
+# there are some NA's that can be rescued
+fold_ins <- 
+  tribble(
+    ~'id', ~'mean_NDVI', 
+    # some areas had NAs, Deigo re-ran in Google Earth Engine and rescued a few polygons
+    # "NY_Manhattan_A1_A_6419",null]
+    # "NY_Manhattan_A2_A_6420",null]
+    # "NY_Manhattan_B1_B_6427",null]
+    # "NY_Manhattan_B2_B_6431",null]
+      "NY_Manhattan_B3_B_6432", 0.4551142857142857
+    , "NY_Manhattan_C1_C_6439", -0.03462424050632912
+    # "NY_Manhattan_C2_C_6440",null]
+    , "NY_Queens_C101_C_6536", 0.05513408311001995
+    , "NY_Manhattan_D1_D_6445", -0.012410000000000001
+    , "NY_Manhattan_D10_D_6446", -0.021987613843351548
+    # "NY_Manhattan_D11_D_6447",null]
+    # "NY_Manhattan_D12_D_6448",null]
+    , "NY_Manhattan_D13_D_6449", 0.1839243206754305
+    , "NY_Manhattan_D2_D_6456", 0.12490000000000001
+    , "NY_Manhattan_D4_D_6466", -0.07473333333333335
+    , "NY_Manhattan_D5_D_6467", -0.015716814536340853
+    , "NY_Manhattan_D6_D_6468", 0.18939010025062658
+    # "NY_Manhattan_D8_D_6470",null]
+    # "NY_Manhattan_D9_D_6471",null]
+    )
+
+fold_ins
+
+# What about the NAs?
+holc_ndvi_summs |> 
+  filter(id %in% fold_ins$id) 
+
+# can 'rescue' some though
+ndvi |> 
+  left_join(fold_ins, by = 'id') |> 
+  filter(!is.na(mean_NDVI))
+
+# update 50 rows, yaay!
+ndvi <-
+  ndvi |> 
+  left_join(fold_ins, by = 'id') |> 
+  mutate(mean = ifelse(!is.na(mean_NDVI), mean_NDVI, mean)) ## |> filter(!is.na(mean_NDVI))
+    
+# double check
+holc |> anti_join(holc_ndvi_summs, by = 'id') # fails perfect!
+
+holc |> 
   left_join(holc_ndvi_summs, by = 'id')
+
+# still some NA's but we don't have data..
+holc_ndvi_summs |> summary()
 
 # write out
 holc_ndvi_summs |> 
