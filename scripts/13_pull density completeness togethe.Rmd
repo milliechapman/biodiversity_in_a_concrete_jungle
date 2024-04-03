@@ -1076,8 +1076,8 @@ sig_labs2 <-
   group_by(taxon, level, dv) |> 
   slice_max(conf.high) |> 
   ungroup() |> 
-  mutate(  star_height = conf.high*1.05
-         , bar_height = conf.high*1.04) |> 
+  mutate(  star_height = conf.high*1.055
+         , bar_height = conf.high*1.0354) |> 
   left_join(
     mods_preds |> 
       select(taxon, level, dv, sigs) |> 
@@ -1232,10 +1232,11 @@ fig_1c <-
     ) +
   geom_text(data = sig_labs2 |> 
               filter(dv == 'Expected Species Richness') |> 
-              mutate(star_height = 
+              mutate(
+                star_height =
                        case_when(
-                         level == 'family' & taxon == 'fungi' ~ 37.3
-                       , level == 'family'  & taxon == 'insecta' ~ 98.6
+                         level == 'family' & taxon == 'fungi' ~ 38.8  #37.3
+                       , level == 'family'  & taxon == 'insecta' ~ 99.5 # 98.6
                        , TRUE ~ star_height),
                      x_axis = case_when(
                          level == 'species' & (taxon == 'fungi' | taxon == 'insecta') ~ 1.9
@@ -1248,6 +1249,8 @@ fig_1c <-
   # geom_segment(data = sig_labs2 |> filter(dv == 'Sampling Density')
   #              , aes(x = 1.15, xend = 3.85, y = bar_height, yend = bar_height)) +
   NULL
+
+fig_1c
 
 library(patchwork)
 fig_1a / fig_1b / fig_1c + plot_annotation(tag_levels = 'I')
