@@ -213,7 +213,8 @@ tic(); (download_plantae <-
           db |>
           filter(countrycode == "US") |> 
           select(
-              kingdom
+              datasetkey
+            , kingdom
             , family
             , genus
             , species
@@ -235,7 +236,8 @@ tic(); (download_plantae <-
                      TRUE ~ 'other')
                  ) |> 
           count(
-              family
+              datasetkey
+            , family
             , genus
             , species
             , year
@@ -274,7 +276,8 @@ tic(); (download_fungi <-
           db |>
           filter(countrycode == "US") |> 
           select(
-              kingdom
+              datasetkey
+            , kingdom
             , family
             , genus
             , species
@@ -296,7 +299,8 @@ tic(); (download_fungi <-
                      TRUE ~ 'other')
                  ) |> 
           count(
-              family
+              datasetkey
+            , family
             , genus
             , species
             , year
@@ -341,7 +345,8 @@ for(i in seq(2000, 2020, 1)){
   tic(); (db |>
             filter(countrycode == "US") |>
             select(
-               kingdom
+                datasetkey
+              , kingdom
               , class
               , family
               , genus
@@ -364,7 +369,8 @@ for(i in seq(2000, 2020, 1)){
                        TRUE ~ 'other')
                    ) |>
             count(
-                family
+                datasetkey
+              , family
               , genus
               , species
               , year
@@ -417,7 +423,8 @@ tic(); (download_insecta <-
           db |>
           filter(countrycode == "US") |> 
           select(
-              kingdom
+              datasetkey
+            , kingdom
             , class # needed for insects
             , family
             , genus
@@ -440,7 +447,8 @@ tic(); (download_insecta <-
                      TRUE ~ 'other')
                  ) |> 
           count(
-              family
+              datasetkey
+            , family
             , genus
             , species
             , year
@@ -476,7 +484,8 @@ tic(); (download_mammalia <-
           db |>
           filter(countrycode == "US") |> 
           select(
-              kingdom
+              datasetkey
+            , kingdom
             , class # needed for mammals
             , family
             , genus
@@ -499,7 +508,8 @@ tic(); (download_mammalia <-
                      TRUE ~ 'other')
                  ) |> 
           count(
-              family
+              datasetkey
+            , family
             , genus
             , species
             , year
@@ -543,7 +553,8 @@ tic(); (download_reptilia <-
           db |>
           filter(countrycode == "US") |> 
           select(
-              kingdom
+              datasetkey
+            , kingdom
             , class
             , family
             , genus
@@ -567,7 +578,8 @@ tic(); (download_reptilia <-
                      TRUE ~ 'other')
                  ) |> 
           count(
-              family
+              datasetkey
+            , family
             , genus
             , species
             , year
@@ -603,7 +615,8 @@ tic(); (download_amphibia <-
           db |>
           filter(countrycode == "US") |> 
           select(
-              kingdom
+              datasetkey
+            , kingdom
             , class
             , family
             , genus
@@ -626,7 +639,8 @@ tic(); (download_amphibia <-
                      TRUE ~ 'other')
                  ) |> 
           count(
-              family
+              datasetkey
+            , family
             , genus
             , species
             , year
@@ -680,7 +694,8 @@ col_names |>
                            , '../biodiversity_in_a_concrete_jungle_data_too_big/gbif_downloads') |>
            str_remove('/aves/download_') |>
            str_remove('/download_') |>
-           str_remove('_2023-01-22.fst')
+           # str_remove('_2023-01-22.fst')
+           str_remove('_2025-02-04.fst')
   ) |> 
   select(name, everything(), -filename) |> 
   View()
